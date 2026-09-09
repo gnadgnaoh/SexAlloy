@@ -956,26 +956,6 @@ fun hookPluginDescriptorGate(method: Method) {
  * descriptors, so organic plugins in the same list survive untouched.
  */
 /**
- * Suppresses a Litho component or section whose only purpose is drawing an ad, by
- * short-circuiting its render to null — Litho treats a null layout as "draw nothing".
- *
- * Deduplicated, because several tags legitimately resolve to the same render method.
- */
-fun hookAdComponentRender(method: Method) {
-    if (!pluginHooksInstalled.add(methodHookKey(method))) return
-    XposedBridge.hookMethod(method, object : XC_MethodHook() {
-        override fun beforeHookedMethod(param: MethodHookParam) { param.result = null }
-    })
-}
-
-/**
- * Suppresses an ad-fetching query.
- *
- * The result is replaced with null rather than an empty object because the callers of
- * these fetch entry points treat a null as "nothing came back", which is the outcome we
- * want. If a surface ever hangs waiting on one of these, this is the hook to disable.
- */
-/**
  * Skips rendering a profile timeline story that carries an advertisement's tracking id.
  *
  * Only the render is short-circuited, and only for that one story: the component this
@@ -1010,13 +990,6 @@ fun hookTimelineStoryRender(method: Method, inspector: FeedItemInspector) {
     })
 }
 
-fun hookAdQueryFetch(method: Method) {
-    if (!pluginHooksInstalled.add(methodHookKey(method))) return
-    XposedBridge.hookMethod(method, object : XC_MethodHook() {
-        override fun beforeHookedMethod(param: MethodHookParam) { param.result = null }
-    })
-}
-
 // ─── Hook installers – ad REQUEST layer ───────────────────────────────────────
 //
 // Everything below stops an advertisement from being asked for, as opposed to removing
@@ -1024,7 +997,7 @@ fun hookAdQueryFetch(method: Method) {
 // a slot that was never filled leaves no gap to collapse, no placeholder to blank and
 // no impression to report, and it saves the bandwidth the creative would have cost.
 //
-// All three installers refuse to touch a method whose return type they cannot satisfy,
+// Each installer refuses to touch a method whose return type it cannot satisfy,
 // because the failure mode of guessing wrong here is a ClassCastException inside
 // Facebook's own code rather than a missed ad.
 
@@ -1034,7 +1007,7 @@ fun hookAdQueryFetch(method: Method) {
  * Restricted to `void` on purpose. Xposed reports "skip the body" by setting a result,
  * and for any other return type that result has to be a value the caller can use — a
  * null returned to code expecting a list or a primitive crashes the surface instead of
- * silencing it. Callers that need a value use [hookEmptyCollectionResult] instead.
+ * silencing it. Callers that need a value use [hookNullAdResult] instead.
  */
 fun hookAdRequestNoOp(method: Method) {
     if (method.returnType != Void.TYPE) return
@@ -1045,26 +1018,10 @@ fun hookAdRequestNoOp(method: Method) {
 }
 
 /**
- * Returns an empty collection from a method that hands back a batch of ads.
- *
- * Used where the caller stores or iterates the result rather than checking it for null:
- * "no ads came back" is a state those callers already handle on every empty response,
- * whereas null is not.
- */
-fun hookEmptyCollectionResult(method: Method) {
-    val empty = buildEmptyListReturn(method.returnType) ?: return
-    if (!pluginHooksInstalled.add(methodHookKey(method))) return
-    XposedBridge.hookMethod(method, object : XC_MethodHook() {
-        override fun beforeHookedMethod(param: MethodHookParam) { param.result = empty }
-    })
-}
-
-/**
  * Answers "there is no advertisement to serve" from a method whose whole job is to hand
  * one back.
  *
- * Distinct from [hookAdRequestNoOp], which only handles `void`, and from
- * [hookEmptyCollectionResult], which needs a collection to hand back: these methods
+ * Distinct from [hookAdRequestNoOp], which only handles `void`: these methods
  * return a single feed-unit edge and already have a documented no-ad path — the vendor
  * logs `empty_pool` and the caller moves on to the next organic story. Null is the value
  * that path produces, so it is the value returned here.
