@@ -835,3 +835,177 @@ val quicksilverBannerAdLoaderMethodsFingerprint = findMethodListDirect {
         }
     }.filter { it.isConcreteHookTarget() }.distinctBy { it.descriptor }
 }
+
+// ─── Search results (SERP) ads ────────────────────────────────────────────────
+//
+// The search results page is its own surface: it runs its own GraphQL query, builds its
+// own item list and renders it with its own components. None of the news-feed machinery
+// above ever sees it, which is why sponsored results survived every feed-side filter.
+//
+// Facebook labels these units itself. The search-result unit carries a type enum whose
+// constants are plain, unobfuscated names, and the advertisement ones say so outright:
+// SEARCH_ADS, TOP_POSITION_SEARCH_ADS, MARKETPLACE_SEARCH_ADS and so on, alongside ~570
+// organic kinds. That is a positive identification of exactly the kind this module
+// prefers: a unit whose type is in the ad set IS an advertisement, and a unit whose type
+// is absent from it is left alone, so the worst outcome is a missed ad rather than an
+// emptied results page.
+
+private const val IMMUTABLE_LIST_CLASS = "com.google.common.collect.ImmutableList"
+private const val FB_USER_SESSION_CLASS = "com.facebook.auth.usersession.FbUserSession"
+private const val SEARCH_RESULTS_CONTEXT_CLASS =
+    "com.facebook.search.results.model.SearchResultsMutableContext"
+
+/**
+ * Four constants that only the search-result unit type enum carries.
+ *
+ * Matched as EXACT strings, not by containment: the enum is the single class in the app
+ * whose constant pool holds all four, so this resolves to one class with no shape test
+ * needed. Four rather than one because a single generic name like "SEARCH_ADS" also
+ * appears in logging tables; the combination does not.
+ */
+private val SEARCH_AD_UNIT_TYPE_ANCHORS = listOf(
+    "TOP_POSITION_SEARCH_ADS",
+    "SEARCH_ADS",
+    "DEPENDENT_SEARCH_ADS",
+    "LATE_DEPENDENT_SEARCH_ADS",
+)
+
+private fun DexKitBridge.searchResultUnitTypeEnumClass(): ClassData =
+    findClass { matcher { usingEqStrings(SEARCH_AD_UNIT_TYPE_ANCHORS) } }
+        .firstOrNull() ?: error("Search result unit type enum not found")
+
+val searchResultUnitTypeEnumFingerprint = findClassDirect { searchResultUnitTypeEnumClass() }
+
+/**
+ * The search-result unit list builder: `static ImmutableList(ImmutableList)`.
+ *
+ * Every result the page displays passes through here exactly once — the method walks the
+ * GraphQL edges of the results connection and wraps each one in a unit object — so it is
+ * the single place where the whole page can be filtered, including the blended
+ * top-position ad. The declaring class is the unit itself, which is how it is found: the
+ * only class in the app that both declares a field of the type enum AND carries a static
+ * ImmutableList-to-ImmutableList method.
+ *
+ * Neither half is pinned to an obfuscated name, and the pair is unique on the shipped
+ * dex (verified against FB 575: exactly one class matches).
+ */
+val searchResultUnitListMethodFingerprint = findMethodDirect {
+    val enumName = searchResultUnitTypeEnumClass().name
+    findClass {
+        matcher {
+            fields { addForType(enumName) }
+            methods {
+                add {
+                    modifiers = Modifier.STATIC
+                    paramTypes(IMMUTABLE_LIST_CLASS)
+                    returnType = IMMUTABLE_LIST_CLASS
+                }
+            }
+        }
+    }.flatMap { cls ->
+        runCatching {
+            cls.findMethod {
+                matcher {
+                    modifiers = Modifier.STATIC
+                    paramTypes(IMMUTABLE_LIST_CLASS)
+                    returnType = IMMUTABLE_LIST_CLASS
+                }
+            }.toList()
+        }.getOrDefault(emptyList())
+    }.first { it.isConcreteHookTarget() }
+}
+
+/**
+ * The controller for the separate top-position ads query.
+ *
+ * Identified by its constructor's parameter shape, which needs no obfuscated name at all:
+ * `(FbUserSession, SearchResultsMutableContext, int)`. `SearchResultsMutableContext` ships
+ * under its real package name, and that constructor shape is unique across the whole app.
+ */
+private fun DexKitBridge.searchAdsControllerClass(): ClassData =
+    findMethod {
+        matcher {
+            name = "<init>"
+            paramTypes(FB_USER_SESSION_CLASS, SEARCH_RESULTS_CONTEXT_CLASS, "int")
+        }
+    }.firstNotNullOfOrNull { it.declaredClass } ?: error("Search ads controller not found")
+
+/**
+ * The "ads have arrived" state of that controller: `(ImmutableList, boolean)`.
+ *
+ * The controller holds its progress in one field whose type is a sealed base with four
+ * states — initial, in flight, failed, and this one, which is the only state that carries
+ * a payload. Emptying that payload is what this fingerprint exists for, and it is the
+ * gentlest possible intervention: an ads query that returns nothing is an outcome the
+ * page already handles on its own every time the server has no ad to sell, so the search
+ * results render exactly as they do on a quiet request.
+ *
+ * The base class is derived, not pinned: it is the controller's only field whose type is
+ * neither a platform type nor a Facebook-packaged one, i.e. the only obfuscated one.
+ */
+val searchAdsLoadedStateConstructorFingerprint = findMethodDirect {
+    val stateBaseName = searchAdsControllerClass().fields
+        .map { it.typeName }
+        .firstOrNull { name -> name.isObfuscatedAppType() }
+        ?: error("Search ads state base class not found")
+
+    findClass {
+        matcher {
+            superClass = stateBaseName
+            methods {
+                add {
+                    name = "<init>"
+                    paramTypes(IMMUTABLE_LIST_CLASS, "boolean")
+                }
+            }
+        }
+    }.flatMap { cls ->
+        runCatching {
+            cls.findMethod {
+                matcher {
+                    name = "<init>"
+                    paramTypes(IMMUTABLE_LIST_CLASS, "boolean")
+                }
+            }.toList()
+        }.getOrDefault(emptyList())
+    }.first()
+}
+
+private fun String.isObfuscatedAppType(): Boolean =
+    '.' in this && !endsWith("[]") &&
+        listOf("java.", "javax.", "kotlin.", "android.", "androidx.", "com.", "org.")
+            .none { startsWith(it) }
+
+/**
+ * Litho components that exist only to draw a search advertisement.
+ *
+ * Unlike the profile timeline's component — which draws organic posts too, and so has to
+ * decide per story — every class reached by these tags is dedicated: the tags are the
+ * components' own registered names, and each declaring class carries a handful of methods
+ * and no organic responsibilities. Suppressing the render outright is therefore safe, and
+ * it is the backstop for the two ad surfaces that carry no name string of their own (the
+ * top-position module and its grid), which the state hook above covers instead.
+ *
+ * Constrained to the Component render return type, which is derived from a known ad
+ * component rather than pinned. That constraint is load-bearing: without it the tag search
+ * also reaches a Section-flavoured render on one of Facebook's large shared classes, and
+ * blanking that would take far more than an advertisement with it.
+ */
+private val SEARCH_AD_COMPONENT_TAGS = listOf(
+    "SearchResultsSponsoredStory",
+    "SearchResultsSponsoredMultiStory",
+    "SearchSerpAd",
+    "SearchAdCard",
+)
+
+val searchAdComponentRenderMethodsFingerprint = findMethodListDirect {
+    val renderType = renderReturnTypeFrom(
+        listOf("ReelsBannerAdsComponent", "FbShortsAdsRootKComponent.render")
+    ) ?: return@findMethodListDirect emptyList()
+
+    classesUsingAnyOf(SEARCH_AD_COMPONENT_TAGS).flatMap { cls ->
+        runCatching {
+            cls.findMethod { matcher { paramCount = 1; returnType = renderType } }.toList()
+        }.getOrDefault(emptyList())
+    }.filter { it.isConcreteHookTarget() }.distinctBy { it.descriptor }
+}
