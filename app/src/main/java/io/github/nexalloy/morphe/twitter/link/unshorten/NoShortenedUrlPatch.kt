@@ -1,19 +1,15 @@
 package io.github.nexalloy.morphe.twitter.link.unshorten
 
-import app.morphe.extension.shared.Logger
-import io.github.nexalloy.PatchExecutor
 import io.github.nexalloy.hookMethod
 import io.github.nexalloy.patch
 
 /**
- * Runs [block], logging instead of aborting the whole patch when it fails.
+ * Runs [block], swallowing failures instead of aborting the whole patch.
  * A single fingerprint that stops matching after a Twitter update should not
  * take down the hooks that still resolve fine.
  */
-private inline fun PatchExecutor.safely(step: String, block: () -> Unit) {
-    runCatching(block).onFailure { err ->
-        Logger.printInfo({ "NoShortenedUrl: step '$step' failed" }, err)
-    }
+private inline fun safely(block: () -> Unit) {
+    runCatching(block)
 }
 
 val NoShortenedUrl = patch(
@@ -29,7 +25,7 @@ val NoShortenedUrl = patch(
     // 12.24.0-prod.02:
     //   <init>(int, String, int, String, String)              -> 1, 3, 4
     //   <init>(int, int, int, String, String, String)         -> 3, 4, 5   (serializer)
-    safely("UrlEntity constructors") {
+    safely {
         var hooked = 0
 
         for (constructor in UrlEntityToStringFingerprint.declaredClass.declaredConstructors) {
@@ -45,7 +41,6 @@ val NoShortenedUrl = patch(
         }
 
         check(hooked > 0) { "No UrlEntity constructor with exactly 3 String parameters" }
-        Logger.printInfo { "NoShortenedUrl: hooked $hooked UrlEntity constructor(s)" }
     }
 
     // ExternalScreenNav entry points that receive a raw url String.
@@ -54,7 +49,7 @@ val NoShortenedUrl = patch(
         OpenExternalBrowserFingerprint,  // openInExternalBrowser(url)
         OpenUrlInAppFingerprint,         // static openUrlInApp(nav, url)
     )) {
-        safely(fingerprint::class.simpleName ?: "external url") {
+        safely {
             val method = fingerprint.method
             val urlIndex = method.parameterTypes.indexOfFirst { it == String::class.java }
             check(urlIndex >= 0) { "${method.name} has no String parameter" }
@@ -70,7 +65,7 @@ val NoShortenedUrl = patch(
         LinkWithPostDetailArgsToStringFingerprint,
         WebViewArgsToStringFingerprint,
     )) {
-        safely(fingerprint::class.simpleName ?: "args toString") {
+        safely {
             for (constructor in fingerprint.declaredClass.declaredConstructors) {
                 val urlIndex = constructor.parameterTypes.indexOfFirst { it == String::class.java }
                 if (urlIndex < 0) continue
