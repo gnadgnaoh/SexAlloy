@@ -4,21 +4,6 @@ import de.robv.android.xposed.XC_MethodHook.MethodHookParam
 import io.github.nexalloy.morphe.twitter.utils.Constants
 import java.util.concurrent.ConcurrentHashMap
 
-internal fun unshortenArgs(
-    param: MethodHookParam,
-    displayIdx: Int,
-    expandedIdx: Int,
-    urlIdx: Int,
-) {
-    val expanded = param.args.getOrNull(expandedIdx) as? String ?: return
-    if (expanded.isEmpty()) return
-
-    rememberExpansion(param.args.getOrNull(urlIdx) as? String, expanded)
-
-    param.args[displayIdx] = expanded
-    param.args[urlIdx] = expanded
-}
-
 private val expansions = ConcurrentHashMap<String, String>()
 
 private fun cacheKey(url: String): String =
@@ -50,6 +35,26 @@ internal fun expandShortLinkOrNull(url: String?): String? {
 internal fun withScheme(url: String): String {
     val lower = url.lowercase()
     return if (lower.startsWith("https://") || lower.startsWith("http://")) url else "https://$url"
+}
+
+/**
+ * Replaces the display url and the t.co url of a UrlEntity constructor call
+ * with the expanded url, and remembers the expansion so that later navigation
+ * calls carrying only the t.co url can be rewritten too.
+ */
+internal fun unshortenArgs(
+    param: MethodHookParam,
+    displayIdx: Int,
+    expandedIdx: Int,
+    urlIdx: Int,
+) {
+    val expanded = param.args.getOrNull(expandedIdx) as? String ?: return
+    if (expanded.isEmpty()) return
+
+    rememberExpansion(param.args.getOrNull(urlIdx) as? String, expanded)
+
+    param.args[displayIdx] = expanded
+    param.args[urlIdx] = expanded
 }
 
 internal fun unshortenArgAt(param: MethodHookParam, index: Int) {
