@@ -22,6 +22,7 @@
         <package android:name="com.zing.zalo" />
         <package android:name="ch.protonvpn.android" />
         <package android:name="com.soundcloud.android" />
+        <package android:name="com.google.android.gm" />
     </queries>
 
     <application
