@@ -191,3 +191,24 @@ object UpgradeOnboardingLaunchFingerprint : Fingerprint(
     returnType = "V",
     parameters = listOf("Landroid/content/Context;"),
 )
+
+object ChangeServerViewStateFlowCollectFingerprint : Fingerprint(
+    definingClass = "Lcom/protonvpn/android/redesign/vpn/ui/ChangeServerViewStateFlow;",
+    name = "collect",
+    returnType = "Ljava/lang/Object;",
+    parameters = listOf(
+        "Lkotlinx/coroutines/flow/FlowCollector;",
+        "Lkotlin/coroutines/Continuation;",
+    ),
+)
+
+object ServerManager2GetRandomServerFingerprint : Fingerprint(
+    definingClass = "Lcom/protonvpn/android/servers/ServerManager2;",
+    name = "getRandomServer",
+    returnType = "Ljava/lang/Object;",
+    parameters = listOf(
+        "Lcom/protonvpn/android/auth/data/VpnUser;",
+        "Lcom/protonvpn/android/vpn/ProtocolSelection;",
+        "Lkotlin/coroutines/Continuation;",
+    ),
+)
