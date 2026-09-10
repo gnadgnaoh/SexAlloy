@@ -2,6 +2,7 @@ package io.github.nexalloy.hoodles.morphe.protonvpn.premium
 
 import de.robv.android.xposed.XC_MethodReplacement
 import de.robv.android.xposed.XposedBridge
+import de.robv.android.xposed.XposedHelpers
 import io.github.nexalloy.enumValueOf
 import io.github.nexalloy.hookMethod
 import io.github.nexalloy.patch
@@ -12,6 +13,8 @@ import java.util.Collections
 
 private const val MAX_TIER = 3
 private const val PAID_TIER_NAME = "vpn2022"
+
+private val freeServersOnlyDepth: ThreadLocal<Int> = ThreadLocal.withInitial { 0 }
 
 val UnlockVpnPlus = patch(
     name = "Unlock VPN Plus",
@@ -29,11 +32,19 @@ val UnlockVpnPlus = patch(
     }
 
     VpnUserGetUserTierFingerprint.hookMethod(XC_MethodReplacement.returnConstant(MAX_TIER))
-    VpnUserGetMaxTierFingerprint.hookMethod(XC_MethodReplacement.returnConstant(MAX_TIER)) // boxed java.lang.Integer
+    VpnUserGetMaxTierFingerprint.hookMethod(XC_MethodReplacement.returnConstant(MAX_TIER))
     VpnUserIsFreeUserFingerprint.hookMethod(XC_MethodReplacement.returnConstant(false))
     VpnUserIsUserPlusOrAboveFingerprint.hookMethod(XC_MethodReplacement.returnConstant(true))
     VpnUserGetUserTierNameFingerprint.hookMethod(XC_MethodReplacement.returnConstant(PAID_TIER_NAME))
-    HasAccessToServerFingerprint.hookMethod(XC_MethodReplacement.returnConstant(true))
+    HasAccessToServerFingerprint.hookMethod {
+        before { param ->
+            param.result = if (freeServersOnlyDepth.get()!! > 0) {
+                param.args[0] != null && param.args[1]?.isFree() == true
+            } else {
+                true
+            }
+        }
+    }
     HaveAccessWithFingerprint.hookMethod(XC_MethodReplacement.returnConstant(true))
     ServerGroupGetAvailableFingerprint.hookMethod(XC_MethodReplacement.returnConstant(true))
 
@@ -56,7 +67,6 @@ val UnlockVpnPlus = patch(
     }
 
     IsFeatureFlagEnabledFingerprint.hookMethod(XC_MethodReplacement.returnConstant(true))
-
     GetNetShieldAvailabilityFingerprint.method.let { method ->
         val available = method.returnType.enumValueOf("AVAILABLE")
             ?: error("NetShieldAvailability.AVAILABLE not found")
@@ -92,8 +102,63 @@ val UnlockVpnPlus = patch(
     })
 
     runCatching {
+        val getRandomServer = ServerManager2GetRandomServerFingerprint.method
+        val collectMethod = ChangeServerViewStateFlowCollectFingerprint.method
+        val freeStateField = collectMethod.declaringClass
+            .getDeclaredField("freeUserChangeServerState")
+            .apply { isAccessible = true }
+        val flowCollect = classLoader.loadClass("kotlinx.coroutines.flow.Flow")
+            .getMethod("collect", *collectMethod.parameterTypes)
+        val distinctUntilChanged = runCatching {
+            classLoader.loadClass("kotlinx.coroutines.flow.FlowKt")
+                .getMethod("distinctUntilChanged", flowCollect.declaringClass)
+        }.getOrNull()
+
+        collectMethod.hookMethod {
+            before { param ->
+                var flow = freeStateField.get(param.thisObject) ?: return@before
+                distinctUntilChanged?.let { flow = it.invoke(null, flow) ?: flow }
+                try {
+                    param.result = flowCollect.invoke(flow, *param.args)
+                } catch (e: InvocationTargetException) {
+                    param.throwable = e.cause ?: e
+                }
+            }
+        }
+
+        getRandomServer.hookMethod {
+            before { freeServersOnlyDepth.set(freeServersOnlyDepth.get()!! + 1) }
+            after { param ->
+                freeServersOnlyDepth.set(freeServersOnlyDepth.get()!! - 1)
+                val server = param.result
+                if (server == null || !serverClass.isInstance(server) || server.isFree()) return@after
+                pickRandomFreeServer(param.thisObject, isFreeServer)?.let { param.result = it }
+            }
+        }
+    }.onFailure { e ->
+        XposedBridge.log("Proton VPN: change server button not restored: $e")
+    }
+
+    runCatching {
         UpgradeOnboardingLaunchFingerprint.hookMethod(XC_MethodReplacement.DO_NOTHING)
     }.onFailure { e ->
         XposedBridge.log("Proton VPN: UpgradeOnboardingLaunch not hooked, onboarding dialog not skipped: $e")
     }
 }
+
+private fun pickRandomFreeServer(serverManager2: Any, isFreeServer: Method): Any? = runCatching {
+    val serverManager = XposedHelpers.getObjectField(serverManager2, "serverManager")
+    val countries = XposedHelpers.callMethod(serverManager, "getExitCountries", false) as List<*>
+    countries
+        .mapNotNull { country ->
+            (XposedHelpers.callMethod(country, "getServerList") as List<*>)
+                .filter { server ->
+                    server != null &&
+                        isFreeServer.invoke(server) as Boolean &&
+                        XposedHelpers.callMethod(server, "getOnline") as Boolean
+                }
+                .takeIf { it.isNotEmpty() }
+        }
+        .randomOrNull()
+        ?.randomOrNull()
+}.getOrNull()
