@@ -14,6 +14,8 @@ import io.github.nexalloy.revanced.facebook.FacebookPatches
 import io.github.nexalloy.revanced.photomath.PhotomathPatches
 import io.github.nexalloy.revanced.strava.StravaPatches
 import io.github.nexalloy.revanced.zalo.ZaloPatches 
+import io.github.nexalloy.mrxsin.gmail.GMAIL_PACKAGE_NAME
+import io.github.nexalloy.mrxsin.gmail.GmailPatches
 import io.github.nexalloy.morphe.twitter.TwitterPatches
 import io.github.nexalloy.morphe.twitter.utils.Constants.PACKAGE_NAME as TWITTER_PACKAGE_NAME
 import io.github.nexalloy.v4n1x.morphe.soundcloud.shared.Constants.PACKAGE_NAME as SOUNDCLOUD_PACKAGE_NAME
@@ -43,6 +45,7 @@ val appPatchConfigurations = listOf(
     AppPatchInfo("Facebook", "com.facebook.katana", FacebookPatches, DexSource.CLASS_LOADER),
     AppPatchInfo("Google (Discover)", "com.google.android.googlequicksearchbox", GoogleDiscoverPatches),
     AppPatchInfo("Twitter/X", TWITTER_PACKAGE_NAME, TwitterPatches),
+    AppPatchInfo("Gmail", GMAIL_PACKAGE_NAME, GmailPatches),
 )
 
 val patchesByPackage = appPatchConfigurations.associate { it.packageName to it.patches }
