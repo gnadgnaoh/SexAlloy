@@ -1,5 +1,7 @@
 package io.github.nexalloy.morphe.youtube.layout.hide.shorts
 
+import android.view.View
+import app.morphe.extension.shared.ResourceUtils.getIdIdentifier
 import app.morphe.extension.youtube.patches.components.ShortsFilter
 import de.robv.android.xposed.XC_MethodReplacement
 import io.github.nexalloy.morphe.shared.misc.litho.filter.addLithoFilter
@@ -12,6 +14,7 @@ import io.github.nexalloy.morphe.youtube.misc.litho.filter.LithoFilter
 import io.github.nexalloy.morphe.youtube.misc.litho.observer.LayoutReloadObserver
 import io.github.nexalloy.morphe.youtube.misc.settings.PreferenceScreen
 import io.github.nexalloy.patch
+import org.luckypray.dexkit.wrap.DexMethod
 
 val HideShortsComponents = patch(
     name = "Hide Shorts components",
@@ -36,7 +39,6 @@ val HideShortsComponents = patch(
                 SwitchPreference("morphe_hide_shorts_history"),
             )
         ),
-        SwitchPreference("morphe_disable_shorts_double_tap_to_like"),
         PreferenceScreenPreference(
             key = "morphe_shorts_player_screen",
             sorting = PreferenceScreenPreference.Sorting.UNSORTED,
@@ -47,6 +49,7 @@ val HideShortsComponents = patch(
                 // Vertical row of buttons on right side of the screen.
                 // Like fountain may no longer be used by YT anymore.
                 //SwitchPreference("morphe_hide_shorts_like_fountain"),
+                SwitchPreference("morphe_disable_shorts_double_tap_to_like"),
                 SwitchPreference("morphe_hide_shorts_like_button"),
                 SwitchPreference("morphe_hide_shorts_comments_button"),
                 SwitchPreference("morphe_hide_shorts_save_button"),
@@ -57,6 +60,7 @@ val HideShortsComponents = patch(
                 // Upper and middle area of the player.
                 SwitchPreference("morphe_hide_shorts_join_button"),
                 SwitchPreference("morphe_hide_shorts_subscribe_button"),
+                SwitchPreference("morphe_hide_shorts_gesture_hints"),
                 SwitchPreference("morphe_hide_shorts_paused_overlay_buttons"),
 
                 // Suggested actions.
@@ -119,6 +123,8 @@ val HideShortsComponents = patch(
     RenderNextUIFeatureFlagFingerprint.hookMethod(XC_MethodReplacement.returnConstant(false))
     // endregion
 
+    // region Disable double-tap to like.
+
     DoubleTapToLikeLogicFingerprint.hookMethod {
         val doubleTapField = ::isDoubleTapField.field
         before {
@@ -127,4 +133,22 @@ val HideShortsComponents = patch(
             doubleTapField.set(it.thisObject, newValue)
         }
     }
+
+    // endregion
+
+
+    // region Hide Shorts gesture hints.
+
+    DexMethod("Landroid/view/ViewStub;->setInflatedId(I)V").hookMethod {
+        val speedmaster_indicator_chip = getIdIdentifier("speedmaster_indicator_chip")
+        val reel_speedmaster_edu_container = getIdIdentifier("reel_speedmaster_edu_container")
+        after {
+            val id = it.args[0]
+            if (id == speedmaster_indicator_chip || id == reel_speedmaster_edu_container) {
+                ShortsFilter.hideGestureHints(it.thisObject as View?)
+            }
+        }
+    }
+
+    // endregion
 }

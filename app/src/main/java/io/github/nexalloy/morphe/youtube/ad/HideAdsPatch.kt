@@ -4,10 +4,12 @@ import android.view.View
 import app.morphe.extension.shared.Logger
 import app.morphe.extension.shared.ResourceUtils
 import app.morphe.extension.youtube.patches.components.AdsFilter
+import app.morphe.extension.youtube.settings.preference.ChannelWhitelistPreference
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedHelpers
 import io.github.nexalloy.morphe.shared.ad.HideFullscreenAds
 import io.github.nexalloy.morphe.shared.misc.litho.filter.addLithoFilter
+import io.github.nexalloy.morphe.shared.misc.settings.preference.NonInteractivePreference
 import io.github.nexalloy.morphe.shared.misc.settings.preference.SwitchPreference
 import io.github.nexalloy.morphe.youtube.layout.hide.general.HideHorizontalShelves
 import io.github.nexalloy.morphe.youtube.misc.engagement.EngagementPanelHook
@@ -40,6 +42,11 @@ val HideAds = patch(
         SwitchPreference("morphe_hide_self_sponsor_ads"),
         SwitchPreference("morphe_hide_shopping_links"),
         SwitchPreference("morphe_hide_video_ads"),
+        NonInteractivePreference(
+            key = "morphe_ads_channel_whitelist",
+            tag = ChannelWhitelistPreference::class.java,
+            selectable = true
+        ),
         SwitchPreference("morphe_hide_youtube_premium_promotions"),
     )
 
