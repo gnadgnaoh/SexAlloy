@@ -2936,3 +2936,72 @@ fun hookSearchAdComponentRender(method: Method) {
         }
     }
 }
+
+// ─── Video viewer extensions ──────────────────────────────────────────────────
+
+/**
+ * Name tokens that mark a video viewer extension as advertising-only.
+ *
+ * Same reasoning as [AD_ONLY_PLUGIN_PACK_TOKENS], one surface over: the eighteen
+ * extensions that ship on the audited build are named for what they draw, and exactly
+ * two of those names carry an advertising token —
+ * `InstreamAdsViewerCoordinatorExtension` (the mid-roll takeover) and
+ * `InstreamAdsFooterExtension` (the sponsored card docked above the comments).
+ *
+ * "InstreamAd" is listed separately from "Ads" so a future singular spelling
+ * (`InstreamAdFooterExtension`) is still caught. Still deliberately NOT a bare "Ad" —
+ * that substring hides inside Loading and Adaptive, and `LoadingSpinnerExtension` is a
+ * real extension on this very surface.
+ */
+val AD_ONLY_VIDEO_EXTENSION_TOKENS = listOf("Ads", "AdBreak", "AdOverlay", "InstreamAd", "SqueezebackAd")
+
+private val adVideoExtensionCache = ConcurrentHashMap<String, Boolean>()
+
+/**
+ * True when [instance] is a viewer extension whose own name says it exists to advertise.
+ *
+ * Resolved per class and cached, by invoking the extension's 0-argument String getters —
+ * the same per-instance test [isAdOnlyPluginPack] applies to plugin packs, and it is
+ * per-instance for the same reason: the gate method is inherited from a base that
+ * organic extensions share, so the method alone identifies nothing.
+ */
+private fun isAdOnlyVideoExtension(instance: Any): Boolean {
+    val className = instance.javaClass.name
+    return adVideoExtensionCache.getOrPut(className) {
+        runCatching {
+            instance.javaClass.declaredMethods
+                .filter { m -> m.parameterCount == 0 && m.returnType == String::class.java && !m.isStatic }
+                .any { m ->
+                    m.isAccessible = true
+                    val name = m.invoke(instance) as? String ?: return@any false
+                    AD_ONLY_VIDEO_EXTENSION_TOKENS.any { token -> name.contains(token, ignoreCase = true) }
+                }
+        }.getOrDefault(false)
+    }
+}
+
+/**
+ * Refuses an advertising-only viewer extension at its own eligibility gate.
+ *
+ * The gate is the first thing the extension host calls, and the render is reached only
+ * when the gate said yes, so answering "this extension does not apply here" removes the
+ * surface instead of blanking it — the same distinction that makes
+ * [hookPluginDescriptorGate] safe on the plugin side. Nothing is drawn, nothing is
+ * measured, and the organic extensions sharing this exact method are untouched because
+ * the decision is taken per instance.
+ *
+ * This is the layer that was missing while live replays leaked ads: the replay opens the
+ * video permalink surface, which builds its overlays from extensions rather than from
+ * video plugin packs.
+ */
+fun hookVideoViewerExtensionGate(method: Method) {
+    if (method.returnType != Boolean::class.javaPrimitiveType) return
+    if (!pluginHooksInstalled.add(methodHookKey(method))) return
+    method.hookMethod {
+        before { param ->
+            val instance = param.thisObject ?: return@before
+            if (!isAdOnlyVideoExtension(instance)) return@before
+            param.result = false
+        }
+    }
+}
