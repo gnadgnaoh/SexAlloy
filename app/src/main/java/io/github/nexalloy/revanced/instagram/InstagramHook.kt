@@ -5,7 +5,7 @@ import io.github.nexalloy.revanced.instagram.network.BlockNetwork
 import io.github.nexalloy.revanced.instagram.tracking.SanitizeTrackingLinks
 import io.github.nexalloy.revanced.instagram.ghost.GhostInterceptor
 import io.github.nexalloy.revanced.instagram.ghost.GhostScreenshot
-import io.github.nexalloy.revanced.instagram.ghost.GhostSeenState
+// import io.github.nexalloy.revanced.instagram.ghost.GhostSeenState
 import io.github.nexalloy.revanced.instagram.ghost.GhostTypingStatus
 // import io.github.nexalloy.revanced.instagram.ghost.GhostViewOnce
 import io.github.nexalloy.revanced.instagram.ghost.GhostViewStory
@@ -26,7 +26,7 @@ val InstagramPatches = arrayOf(
     // ── Ghost Mode ───────────────────────────────────────────────────────────
     GhostInterceptor,             // blocks network: screenshot, viewOnce, storySeen
     GhostScreenshot,              // blocks screenshot notification
-    GhostSeenState,               // blocks DM read receipts
+    // GhostSeenState,               // blocks DM read receipts
     GhostTypingStatus,            // hides typing indicator
     // GhostViewOnce,                // prevents view-once consumption
     GhostViewStory,               // blocks story-seen pings
