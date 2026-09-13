@@ -24,6 +24,21 @@ private fun MethodData.isConcreteHookTarget(): Boolean {
     return !Modifier.isInterface(ownerModifiers) && !Modifier.isAbstract(ownerModifiers)
 }
 
+/**
+ * A looser sibling of [isConcreteHookTarget], for targets whose *declaring* class may be
+ * abstract while the method itself has a body.
+ *
+ * [isConcreteHookTarget] rejects those, and for the feed fingerprints it is right to:
+ * there the abstract owner means the match is a declaration and the real work lives in a
+ * subclass. The instream ad-break senders are the opposite case — the fetch is written
+ * once on an abstract base and inherited by every concrete surface, so rejecting it by
+ * owner would silently drop the banner/video fetch path (verified: it is declared on an
+ * abstract class on the audited build). Hooking a non-abstract method on an abstract
+ * class is valid: the body exists and runs for every instance of every subclass.
+ */
+private fun MethodData.isHookableMethod(): Boolean =
+    !isConstructor && !Modifier.isAbstract(modifiers)
+
 // ─── Ad-kind enum ─────────────────────────────────────────────────────────────
 
 val adKindEnumFingerprint = findClassDirect {
@@ -1006,4 +1021,125 @@ val searchAdComponentRenderMethodsFingerprint = findMethodListDirect {
             cls.findMethod { matcher { paramCount = 1; returnType = renderType } }.toList()
         }.getOrDefault(emptyList())
     }.filter { it.isConcreteHookTarget() }.distinctBy { it.descriptor }
+}
+
+
+// ─── Video viewer extensions ──────────────────────────────────────────────────
+//
+// The video permalink surface — the page a "Đã phát trực tiếp" / was-live replay opens
+// into, with the player on top and the comment list below — does NOT assemble its
+// overlays from the video plugin system that [allPluginPackListMethodsFingerprint] and
+// [pluginDescriptorGateMethodsFingerprint] cover. It uses a second, parallel mechanism:
+// viewer *extensions*, an abstract base with
+//
+//     <name>()   : String                                        - the extension's name
+//     <gate>(FbUserSession, Object, Object)          : boolean    - "does this apply?"
+//     <render>(FbUserSession, ComponentContext, ..., Object, Object) : Component
+//
+// and a base wrapper that calls <gate> first and only then <render>. Eighteen of them
+// ship on the audited build; exactly two are advertising:
+//
+//     InstreamAdsViewerCoordinatorExtension - the mid-roll takeover ("your video will
+//                                            resume in N seconds")
+//     InstreamAdsFooterExtension            - the dockable sponsored card that sits
+//                                            between the player and the comments
+//
+// Those two are why ads leaked on live replays while ordinary videos stayed clean: a
+// replay opens the permalink surface, and nothing in NexAlloy reached the extension
+// layer. The gate is hooked on EVERY extension and filtered per instance by the
+// extension's own name, exactly as [hookPluginPackList] does for packs — an ad
+// extension's name is built from a static string, but pinning the obfuscated class
+// would not survive the next build.
+
+val videoViewerExtensionGateMethodsFingerprint = findMethodListDirect {
+    val seed = listOf("InstreamAdsViewerCoordinatorExtension", "InstreamAdsFooterExtension")
+        .firstNotNullOfOrNull { tag ->
+            runCatching {
+                findClass {
+                    matcher {
+                        methods {
+                            matchType = MatchType.Contains
+                            add { returnType = "java.lang.String"; paramCount = 0; usingStrings(tag) }
+                        }
+                    }
+                }.firstOrNull()
+            }.getOrNull()
+        } ?: error("No instream ads viewer extension to seed the extension shape from")
+
+    val nameGetter = seed.methods.firstOrNull {
+        it.paramTypeNames.isEmpty() && it.returnTypeName == "java.lang.String"
+    } ?: error("Viewer extension name getter shape not found")
+
+    val gate = seed.methods.firstOrNull {
+        it.returnTypeName == "boolean" &&
+            it.paramTypeNames.size == 3 &&
+            it.paramTypeNames[0] == "com.facebook.auth.usersession.FbUserSession"
+    } ?: error("Viewer extension gate shape not found")
+
+    // Requiring BOTH shapes on the same class is what keeps this off unrelated methods
+    // that happen to share the obfuscated gate name: an extension is the only thing in
+    // the app that carries a 0-arg name getter and a session-scoped boolean gate.
+    findClass {
+        matcher {
+            methods {
+                matchType = MatchType.Contains
+                add { name = nameGetter.name; paramCount = 0; returnType = "java.lang.String" }
+                add { name = gate.name; paramCount = 3; returnType = "boolean" }
+            }
+        }
+    }.flatMap { cls ->
+        runCatching {
+            cls.findMethod {
+                matcher {
+                    name = gate.name
+                    returnType = "boolean"
+                    paramTypes("com.facebook.auth.usersession.FbUserSession", null, null)
+                }
+            }.toList()
+        }.getOrDefault(emptyList())
+    }.filter { it.isHookableMethod() }.distinctBy { it.descriptor }
+}
+
+// ─── Instream ad break fetch ──────────────────────────────────────────────────
+//
+// One layer below the UI: the methods that send the GraphQL query for the advert that
+// fills a commercial break. Three of them on the audited build — the video ad fetch, the
+// banner ad fetch and the extended-breaks fetch — and all three are `void` and announce
+// themselves in their own log line, which is what anchors them here.
+//
+// Skipping the call is a state the app produces on its own every session: each of these
+// methods already has early returns (an in-flight fetch, a blocked query reason) that
+// leave the state machine with nothing to play, and the player then simply carries on
+// with the host video. That is why the fetch is the chosen choke point rather than the
+// response — no half-built ad break is ever created to be torn down.
+//
+// Deliberately NOT anchored on "commercial_break_query_send": that string is also
+// carried by the analytics logger, which must keep running.
+
+val adBreakFetchKickoffMethodsFingerprint = findMethodListDirect {
+    methodsUsingAnyOf(
+        listOf(
+            "Kicking off video ad fetch",
+            "Kicking off banner ads fetch",
+            "Kicking off extended breaks fetch",
+        )
+    ).filter { it.returnTypeName == "void" && it.isHookableMethod() }
+        .distinctBy { it.descriptor }
+}
+
+// ─── Was-live ad break control render ─────────────────────────────────────────
+//
+// The replay-specific Litho control that inserts the ad break coordinator into a video
+// that WAS live but is no longer. Named NonLiveWasLiveAdBreakControlComponent by
+// Facebook, exists for nothing else, and returning nothing from a Litho render is a
+// state Litho handles natively. A backstop for the gate above, not a replacement.
+
+val wasLiveAdBreakControlRenderMethodsFingerprint = findMethodListDirect {
+    methodsUsingAnyOf(listOf("NonLiveWasLiveAdBreakControlComponent"))
+        .filter {
+            it.paramTypeNames.size == 1 &&
+                it.returnTypeName !in NON_RENDER_RETURN_TYPES &&
+                it.isHookableMethod()
+        }
+        .distinctBy { it.descriptor }
 }
