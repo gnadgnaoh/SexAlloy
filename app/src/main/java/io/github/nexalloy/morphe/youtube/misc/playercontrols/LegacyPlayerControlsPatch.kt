@@ -15,7 +15,9 @@ import io.github.nexalloy.morphe.youtube.misc.playservice.VersionCheck
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_20_28_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_20_30_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_20_31_or_greater
+import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_04_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_05_or_greater
+import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_36_or_greater
 import io.github.nexalloy.morphe.youtube.misc.settings.PreferenceScreen
 import io.github.nexalloy.patch
 import org.luckypray.dexkit.wrap.DexMethod
@@ -40,6 +42,15 @@ fun addTopControl(layout: Int, startViewId: Int, endViewId: Int) {
 
 fun addLegacyBottomControl(layout: Int) {
     bottomControlLayouts.add(layout)
+}
+
+private var newPlayerControlsOverride = false
+
+internal fun disableNewPlayerControlsFeatureFlag() {
+    if (!is_21_04_or_greater || newPlayerControlsOverride) return
+    newPlayerControlsOverride = true
+
+    insertLiteralOverride(45752335L)
 }
 
 fun initializeTopControl(control: ControlInitializer) {
@@ -104,6 +115,11 @@ val LegacyPlayerControls = patch(
             SwitchPreference("morphe_restore_old_player_buttons", summary = true)
         )
     }
+
+    if (is_21_36_or_greater) {
+        disableNewPlayerControlsFeatureFlag()
+    }
+
     // Override flags that interfere with old player icons override.
     insertLiteralOverride(45757309, LegacyPlayerControlsPatch::allowModernPlayerLayoutFlags)
     insertLiteralOverride(45771730, LegacyPlayerControlsPatch::allowModernPlayerLayoutFlags)
@@ -119,7 +135,9 @@ val LegacyPlayerControls = patch(
     overrideExploderLayout(45643739L)
 
     // Turn off a/b tests of ugly player buttons that don't match the style of custom player buttons.
-    overrideExploderLayout(45686474L)
+    if (!is_21_36_or_greater) {
+        overrideExploderLayout(45686474L)
+    }
 
     if (is_20_28_or_greater) {
         overrideExploderLayout(45709810L)

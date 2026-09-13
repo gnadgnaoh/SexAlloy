@@ -79,6 +79,7 @@ val HideLayoutComponents = patch(
                 SwitchPreference("morphe_hide_ai_generated_video_summary_section"),
                 SwitchPreference("morphe_hide_ask_section"),
                 SwitchPreference("morphe_hide_attributes_section", summary = true),
+                SwitchPreference("morphe_hide_channel_links_section"),
                 SwitchPreference("morphe_hide_chapters_section"),
                 SwitchPreference("morphe_hide_corrections_section"),
                 SwitchPreference("morphe_hide_course_progress_section"),
@@ -254,6 +255,17 @@ val HideLayoutComponents = patch(
                         SwitchPreference(
                             key = "morphe_hide_aislist_warnlist_search",
                             titleKey = "morphe_hide_aislist_hide_search_title"
+                        )
+                    )
+                ),
+                PreferenceCategory(
+                    key = "morphe_aislist_submit_category",
+                    sorting = Sorting.UNSORTED,
+                    preferences = setOf(
+                        SwitchPreference("morphe_aislist_submit_flyout_menu", summary = true),
+                        TextPreference(
+                            key = "morphe_aislist_submit_username",
+                            inputType = InputType.TEXT
                         )
                     )
                 ),
@@ -451,15 +463,15 @@ val HideLayoutComponents = patch(
     // hide live chat donators bar
     // layout.live_chat_ticker_item
 
-    // TODO hide floating microphone — ShowFloatingMicrophoneButtonFingerprint METHOD_MID
+    // TODO hide floating microphone
 
     // hide latest videos button
     // layout.content_pill
     // layout.bar
 
-    // TODO hide YouTube Doodles — YouTubeDoodlesImageViewFingerprint METHOD_MID (replace setImageDrawable)
+    // TODO hide YouTube Doodles
 
-    // TODO hide view count — HideViewCountFingerprint METHOD_MID (modifyFeedSubtitleSpan)
+    // TODO hide view count
 
     // region hide filter bar
     // dimen.filter_bar_height
@@ -476,7 +488,7 @@ val HideLayoutComponents = patch(
 
     // endregion
 
-    // TODO hide you may like section — SearchSuggestionEndpoint/SearchBoxTypingString METHOD_MID (complex helper)
+    // TODO hide you may like section
 
     // region TODO hide flyout menu
 /*
@@ -499,7 +511,7 @@ val HideLayoutComponents = patch(
 
     // endregion
 
-    // TODO hide channel tab — ChannelTabBuilder/ChannelTabRenderer METHOD_MID (iterator manipulation)
+    // TODO hide channel tab
 
     // TODO hide search term thumbnails
 

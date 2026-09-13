@@ -8,9 +8,9 @@ import android.widget.TextView
 import app.morphe.extension.shared.ResourceUtils
 import app.morphe.extension.shared.sponsorblock.objects.SegmentCategoryPreference
 import app.morphe.extension.shared.sponsorblock.ui.SponsorBlockAboutPreference
+import app.morphe.extension.youtube.settings.preference.ChannelWhitelistPreference
 import app.morphe.extension.youtube.sponsorblock.YouTubeSponsorBlockConfig
 import app.morphe.extension.youtube.sponsorblock.preferences.SponsorBlockApiUrlPreference
-import app.morphe.extension.youtube.sponsorblock.preferences.SponsorBlockChannelWhitelistPreference
 import app.morphe.extension.youtube.sponsorblock.preferences.SponsorBlockCreateSegmentSwitchPreference
 import app.morphe.extension.youtube.sponsorblock.preferences.SponsorBlockGuidelinesPreference
 import app.morphe.extension.youtube.sponsorblock.preferences.SponsorBlockImportExportPreference
@@ -21,6 +21,7 @@ import app.morphe.extension.youtube.sponsorblock.ui.SponsorBlockStatsPreferenceC
 import app.morphe.extension.youtube.sponsorblock.ui.SponsorBlockViewController
 import app.morphe.extension.youtube.sponsorblock.ui.VotingButton
 import io.github.nexalloy.R
+import io.github.nexalloy.morphe.music.misc.playservice.versionCheckPatch
 import io.github.nexalloy.morphe.shared.misc.settings.preference.BasePreference
 import io.github.nexalloy.morphe.shared.misc.settings.preference.InputType
 import io.github.nexalloy.morphe.shared.misc.settings.preference.ListPreference
@@ -32,8 +33,10 @@ import io.github.nexalloy.morphe.shared.misc.settings.preference.TextPreference
 import io.github.nexalloy.morphe.youtube.misc.playercontrols.ControlInitializer
 import io.github.nexalloy.morphe.youtube.misc.playercontrols.LegacyPlayerControls
 import io.github.nexalloy.morphe.youtube.misc.playercontrols.addTopControl
+import io.github.nexalloy.morphe.youtube.misc.playercontrols.disableNewPlayerControlsFeatureFlag
 import io.github.nexalloy.morphe.youtube.misc.playercontrols.initializeTopControl
 import io.github.nexalloy.morphe.youtube.misc.playertype.PlayerTypeHook
+import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_36_or_greater
 import io.github.nexalloy.morphe.youtube.misc.settings.PreferenceScreen
 import io.github.nexalloy.morphe.youtube.video.information.VideoInformationPatch
 import io.github.nexalloy.morphe.youtube.video.information.onCreateHook
@@ -57,6 +60,7 @@ val SponsorBlock = patch(
         VideoId,
         PlayerTypeHook,
         LegacyPlayerControls,
+        versionCheckPatch
     )
 
     PreferenceScreen.SPONSORBLOCK.addPreferences(
@@ -135,7 +139,7 @@ val SponsorBlock = patch(
                 ),
                 NonInteractivePreference(
                     key = "morphe_sb_channel_whitelist",
-                    tag = SponsorBlockChannelWhitelistPreference::class.java,
+                    tag = ChannelWhitelistPreference::class.java,
                     selectable = true
                 ),
                 SwitchPreference("morphe_sb_toast_on_whitelisted_channel", summary = true),
@@ -256,5 +260,11 @@ val SponsorBlock = patch(
             val textView = adProgressTextField.get(it.thisObject) as TextView
             YouTubeSponsorBlockConfig.setAdProgressTextVisibility(textView.visibility)
         }
+    }
+
+    // FIXME: Skip buttons do not show in new player controls layout.
+    //        Skip buttons may need to be added at runtime like other overlay buttons.
+    if (is_21_36_or_greater) {
+        disableNewPlayerControlsFeatureFlag()
     }
 }
