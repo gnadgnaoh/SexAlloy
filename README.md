@@ -1,7 +1,6 @@
 <div align="center">
   <h1>SexAlloy</h1>
   <a href="https://t.me/unofficalrevancedchat"><img alt="Telegram Channel" src="https://img.shields.io/badge/Telegram_Channel-blue.svg?logo=telegram&logoColor=white"></a>
-  <a href="https://github.com/gnadgnaoh/SexAlloy"><img alt="GitHub Downloads" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fshields.chsbuffer.workers.dev%2F%3Frepos%3DNexAlloy%2FNexAlloy%26cacheSeconds%3D3600"></a>
   <a href="https://github.com/gnadgnaoh/SexAlloy"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/gnadgnaoh/SexAlloy"></a>  
   <br>
 </div>
@@ -163,8 +162,7 @@
 ---
 
 ## Supports
-[![Discord Server](https://img.shields.io/badge/Join-Discord-5865F2.svg?logo=discord)](https://discord.gg/QWUrAA2mKq)  
-[![FAQ](https://img.shields.io/badge/Read-FAQ-orange.svg?logo=github)](https://github.com/NexAlloy/NexAlloy/wiki/Frequently-Asked-Questions)  
+<a href="https://t.me/unofficalrevancedchat"><img alt="Telegram Channel" src="https://img.shields.io/badge/Telegram_Channel-blue.svg?logo=telegram&logoColor=white"></a>
 or [Create an issue](https://github.com/NexAlloy/NexAlloy/issues/new/choose)
 
 ## ⭐ Credits
