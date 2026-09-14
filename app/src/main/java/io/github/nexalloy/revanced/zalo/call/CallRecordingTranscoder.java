@@ -21,6 +21,9 @@ final class CallRecordingTranscoder {
 
     static void wavToM4a(File wavFile, File outputFile) throws IOException {
         WavInfo wav = readWav(wavFile);
+        CallRecordingLog.d("wavToM4a: " + wavFile.getName() + " channels=" + wav.channels
+                + " sampleRate=" + wav.sampleRate + " dataLength=" + wav.dataLength
+                + " -> " + outputFile.getName());
         MediaCodec codec = null;
         MediaMuxer muxer = null;
         boolean muxerStarted = false;
@@ -125,8 +128,11 @@ final class CallRecordingTranscoder {
             }
         }
         if (!outputFile.isFile() || outputFile.length() <= 0L) {
+            CallRecordingLog.w("wavToM4a: output missing/empty for " + wavFile.getName());
             throw new IOException("AAC output is empty");
         }
+        CallRecordingLog.d("wavToM4a: wrote " + outputFile.length() + " bytes to "
+                + outputFile.getName());
     }
 
     static boolean isPcmWave(File file) {
@@ -150,6 +156,7 @@ final class CallRecordingTranscoder {
      */
     static boolean repairHeader(File file) {
         if (file == null || !file.isFile()) {
+            CallRecordingLog.w("repairHeader: file missing: " + file);
             return false;
         }
         if (isPcmWave(file)) {
@@ -158,9 +165,12 @@ final class CallRecordingTranscoder {
         try (RandomAccessFile input = new RandomAccessFile(file, "rw")) {
             long fileLength = input.length();
             if (fileLength < 44L) {
+                CallRecordingLog.w("repairHeader: " + file.getName() + " too short ("
+                        + fileLength + " bytes), native capture likely never wrote any audio");
                 return false;
             }
             if (!"RIFF".equals(readFourCc(input))) {
+                CallRecordingLog.w("repairHeader: " + file.getName() + " missing RIFF header");
                 return false;
             }
             readUnsignedInt(input);
@@ -196,6 +206,8 @@ final class CallRecordingTranscoder {
                 input.seek(content + length + (length & 1L));
             }
             if (!pcm16 || dataContent < 0L || dataContent >= fileLength) {
+                CallRecordingLog.w("repairHeader: " + file.getName() + " not 16-bit PCM or no "
+                        + "'data' chunk found (pcm16=" + pcm16 + " dataContent=" + dataContent + ")");
                 return false;
             }
             long realDataLength = fileLength - dataContent;
@@ -206,10 +218,13 @@ final class CallRecordingTranscoder {
             writeUnsignedInt(input, realDataLength);
             input.seek(4L);
             writeUnsignedInt(input, fileLength - 8L);
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            CallRecordingLog.e("repairHeader: I/O error repairing " + file.getName(), e);
             return false;
         }
-        return isPcmWave(file);
+        boolean repaired = isPcmWave(file);
+        CallRecordingLog.d("repairHeader: " + file.getName() + " repaired=" + repaired);
+        return repaired;
     }
 
     private static int read(RandomAccessFile input, ByteBuffer buffer, int requested)

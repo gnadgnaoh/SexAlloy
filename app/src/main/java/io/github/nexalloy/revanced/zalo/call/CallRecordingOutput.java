@@ -101,24 +101,38 @@ public final class CallRecordingOutput {
             String fallbackPhone,
             StatusListener listener) {
         if (context == null || wavFile == null) {
+            CallRecordingLog.w("finalizeRecording: aborting, context=" + context
+                    + " wavFile=" + wavFile);
             if (listener != null) listener.onFailed();
             return;
         }
+        CallRecordingLog.d("finalizeRecording: queued " + wavFile.getAbsolutePath()
+                + " exists=" + wavFile.isFile()
+                + " size=" + (wavFile.isFile() ? wavFile.length() : -1)
+                + " direction=" + direction + " peerUid=" + peerUid);
         final Context app = context.getApplicationContext();
         final String key = wavFile.getAbsolutePath();
         if (!QUEUED.add(key)) {
+            CallRecordingLog.w("finalizeRecording: " + key + " already queued, skipping duplicate");
             return;
         }
         FINALIZER.execute(() -> {
             try {
                 CallRecordingContacts.Result contact =
                         CallRecordingContacts.resolve(app, peerUid, fallbackName, fallbackPhone);
+                CallRecordingLog.d("finalizeRecording: resolved contact displayName="
+                        + contact.displayName + " phoneNumber=" + contact.phoneNumber);
                 boolean ok = convertAndPublish(app, wavFile, startedAt,
                         contact.displayName, contact.phoneNumber);
+                CallRecordingLog.d("finalizeRecording: convertAndPublish result=" + ok
+                        + " for " + key);
                 if (listener != null) {
                     if (ok) listener.onSaved();
                     else listener.onFailed();
                 }
+            } catch (Throwable t) {
+                CallRecordingLog.e("finalizeRecording: unexpected failure for " + key, t);
+                if (listener != null) listener.onFailed();
             } finally {
                 QUEUED.remove(key);
             }
@@ -132,15 +146,21 @@ public final class CallRecordingOutput {
             File[] pending = tempDirectory(app).listFiles(
                     (ignored, name) -> name.endsWith(".part"));
             if (pending == null) {
+                CallRecordingLog.d("recoverPending: no temp directory / listFiles returned null");
                 return;
             }
+            CallRecordingLog.d("recoverPending: found " + pending.length + " leftover .part file(s)");
             for (File file : pending) {
                 if (!isNativeImportReady(file) && !repairNativeImport(file)) {
+                    CallRecordingLog.w("recoverPending: " + file.getName()
+                            + " is not a valid/repairable WAV, leaving it in place");
                     continue;
                 }
                 Matcher matcher = PART_NAME.matcher(file.getName());
                 long startedAt = matcher.matches() ? parseLong(matcher.group(1)) : file.lastModified();
                 boolean ok = convertAndPublish(app, file, startedAt, "Zalo contact", "");
+                CallRecordingLog.d("recoverPending: convertAndPublish(" + file.getName()
+                        + ") result=" + ok);
                 if (listener != null) {
                     if (ok) listener.onSaved();
                     else listener.onFailed();
@@ -152,19 +172,27 @@ public final class CallRecordingOutput {
     private static boolean convertAndPublish(
             Context context, File wavFile, long startedAt, String displayName, String phoneNumber) {
         if (!isNativeImportReady(wavFile) && !repairNativeImport(wavFile)) {
+            CallRecordingLog.w("convertAndPublish: " + wavFile.getName()
+                    + " failed isNativeImportReady and repairNativeImport, aborting");
             return false;
         }
         File encoded = new File(wavFile.getParentFile(), wavFile.getName() + ".m4a.tmp");
         try {
             CallRecordingTranscoder.wavToM4a(wavFile, encoded);
+            CallRecordingLog.d("convertAndPublish: transcoded " + wavFile.getName()
+                    + " -> " + encoded.getName() + " (" + encoded.length() + " bytes)");
             Uri saved = publish(context, encoded,
                     buildDisplayName(startedAt, displayName, phoneNumber));
             if (saved == null) {
+                CallRecordingLog.w("convertAndPublish: publish() returned null uri for "
+                        + wavFile.getName());
                 return false;
             }
+            CallRecordingLog.d("convertAndPublish: published " + saved);
             wavFile.delete();
             return true;
         } catch (Throwable throwable) {
+            CallRecordingLog.e("convertAndPublish: failed for " + wavFile.getName(), throwable);
             return false;
         } finally {
             encoded.delete();
@@ -173,6 +201,8 @@ public final class CallRecordingOutput {
 
     private static Uri publish(Context context, File source, String displayName) throws IOException {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            CallRecordingLog.w("publish: SDK_INT=" + Build.VERSION.SDK_INT
+                    + " is below Android 10, MediaStore publish unsupported");
             throw new IOException("Shared call recordings require Android 10 or newer");
         }
         ContentResolver resolver = context.getContentResolver();
@@ -185,6 +215,8 @@ public final class CallRecordingOutput {
         values.put(MediaStore.Audio.Media.IS_PENDING, 1);
         Uri uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values);
         if (uri == null) {
+            CallRecordingLog.w("publish: resolver.insert() returned null for displayName="
+                    + displayName + " (missing storage permission on this build?)");
             return null;
         }
         try (InputStream input = new FileInputStream(source);
@@ -194,6 +226,7 @@ public final class CallRecordingOutput {
             }
             copy(input, output);
         } catch (Throwable throwable) {
+            CallRecordingLog.e("publish: copy to " + uri + " failed, deleting row", throwable);
             resolver.delete(uri, null, null);
             if (throwable instanceof IOException) {
                 throw (IOException) throwable;

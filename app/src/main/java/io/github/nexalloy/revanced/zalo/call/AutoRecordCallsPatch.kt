@@ -83,29 +83,103 @@ private object CallRecorder {
         val classLoader = executor.classLoader
         appContext = executor.appContext
 
+        val pkg = appContext?.let { ctx ->
+            try {
+                val info = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+                val versionCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    info.longVersionCode
+                } else {
+                    @Suppress("DEPRECATION") info.versionCode.toLong()
+                }
+                "${ctx.packageName} ${info.versionName} ($versionCode)"
+            } catch (t: Throwable) {
+                "unknown (getPackageInfo failed: $t)"
+            }
+        } ?: "unknown (no appContext)"
+        Logger.printInfo { "[Zalo][CallRecording] install() starting for $pkg" }
+        Logger.printInfo {
+            "[Zalo][CallRecording] pinned symbol table: PEER_MANAGER_CLASS=" +
+                "${CallRecordingSymbols.PEER_MANAGER_CLASS} CURRENT_CALLBACK_CLASS=" +
+                "${CallRecordingSymbols.CURRENT_CALLBACK_CLASS} ACTIVITY_READY_METHOD=" +
+                "${CallRecordingSymbols.ACTIVITY_READY_METHOD} (verified for Zalo 26.08.02 / " +
+                "260802903 only - expect these to miss on any other build)"
+        }
+
         val peerClass = loadOrNull(CallRecordingSymbols.PEER_JNI, classLoader)
-            ?: throw IllegalStateException("PeerJNI missing; ZRTC recorder unavailable")
+        if (peerClass == null) {
+            Logger.printInfo {
+                "[Zalo][CallRecording] FATAL: class ${CallRecordingSymbols.PEER_JNI} not found " +
+                    "in this build's classloader. The primary (non-obfuscated) capture path " +
+                    "cannot work at all on this Zalo version."
+            }
+            throw IllegalStateException("PeerJNI missing; ZRTC recorder unavailable")
+        }
+        Logger.printInfo { "[Zalo][CallRecording] resolved PeerJNI class: ${peerClass.name}" }
 
-        recordMethod = peerClass.getDeclaredMethod(
-            START_RECORD, Long::class.javaPrimitiveType,
-            Boolean::class.javaPrimitiveType, String::class.java
-        ).apply { isAccessible = true }
-        isInCallMethod = peerClass.getDeclaredMethod(
-            IS_IN_CALL, Long::class.javaPrimitiveType
-        ).apply { isAccessible = true }
+        try {
+            recordMethod = peerClass.getDeclaredMethod(
+                START_RECORD, Long::class.javaPrimitiveType,
+                Boolean::class.javaPrimitiveType, String::class.java
+            ).apply { isAccessible = true }
+            isInCallMethod = peerClass.getDeclaredMethod(
+                IS_IN_CALL, Long::class.javaPrimitiveType
+            ).apply { isAccessible = true }
+        } catch (t: Throwable) {
+            Logger.printException({
+                "[Zalo][CallRecording] FATAL: could not resolve $START_RECORD/$IS_IN_CALL on " +
+                    "${peerClass.name} - native recorder entry points changed signature on this build"
+            }, t)
+            throw t
+        }
+        Logger.printInfo {
+            "[Zalo][CallRecording] resolved native methods: $START_RECORD, $IS_IN_CALL"
+        }
 
-        var hooks = 0
-        hooks += hookPeerMetadata(peerClass)
-        hooks += hookAudioStreamRegistration(peerClass)
-        hooks += hookPeerTermination(peerClass)
-        hooks += hookCallbackRegistration(peerClass)
-        hooks += hookCallbackBase(classLoader)
-        hooks += hookCurrentCallback(classLoader)
-        hooks += hookActivities(classLoader)
-        hooks += hookNotifications()
+        val peerMetadataHooks = hookPeerMetadata(peerClass)
+        val audioStreamHooks = hookAudioStreamRegistration(peerClass)
+        val terminationHooks = hookPeerTermination(peerClass)
+        val callbackRegistrationHooks = hookCallbackRegistration(peerClass)
+        val callbackBaseHooks = hookCallbackBase(classLoader)
+        val currentCallbackHooks = hookCurrentCallback(classLoader)
+        val activityHooks = hookActivities(classLoader)
+        val notificationHooks = hookNotifications()
+
+        val hooks = peerMetadataHooks + audioStreamHooks + terminationHooks +
+            callbackRegistrationHooks + callbackBaseHooks + currentCallbackHooks +
+            activityHooks + notificationHooks
+
+        Logger.printInfo {
+            "[Zalo][CallRecording] hook counts - peerMetadata=$peerMetadataHooks " +
+                "audioStreamRegistration=$audioStreamHooks peerTermination=$terminationHooks " +
+                "callbackRegistration=$callbackRegistrationHooks callbackBase=$callbackBaseHooks " +
+                "currentCallback(obf)=$currentCallbackHooks activities(obf)=$activityHooks " +
+                "notifications=$notificationHooks"
+        }
+        if (callbackBaseHooks == 0) {
+            Logger.printInfo {
+                "[Zalo][CallRecording] WARNING: callbackBase=0 means no method on " +
+                    "${CallRecordingSymbols.CALL_CALLBACK} matched " +
+                    "CallRecordingLifecycle.observes() - if VNG renamed the ZRTC callback " +
+                    "methods (onIncomingCall/onCallAudioState/onCallEnd/...) on this build, the " +
+                    "primary start/stop trigger will never fire even though hooks 'installed' ok."
+            }
+        }
+        if (currentCallbackHooks == 0) {
+            Logger.printInfo {
+                "[Zalo][CallRecording] note: currentCallback(obf)=0 - " +
+                    "${CallRecordingSymbols.CURRENT_CALLBACK_CLASS} not found or hooked; expected " +
+                    "on any build other than 26.08.02 (260802903), harmless if callbackBase>0"
+            }
+        }
+        if (activityHooks == 0) {
+            Logger.printInfo {
+                "[Zalo][CallRecording] note: activities(obf)=0 - secondary in-call-activity " +
+                    "trigger unavailable on this build, harmless if callbackBase>0"
+            }
+        }
 
         check(hooks > 0) { "No call lifecycle hooks installed" }
-        Logger.printInfo { "[Zalo] Auto-record installed $hooks hooks" }
+        Logger.printInfo { "[Zalo][CallRecording] Auto-record installed $hooks hooks total" }
 
         recoverPending()
     }
@@ -210,20 +284,40 @@ private object CallRecorder {
             }
         }
 
-    private fun hookCallbackBase(classLoader: ClassLoader): Int =
-        loadOrNull(CallRecordingSymbols.CALL_CALLBACK, classLoader)
-            ?.let { hookCallbackClass(it) } ?: 0
+    private fun hookCallbackBase(classLoader: ClassLoader): Int {
+        val callbackClass = loadOrNull(CallRecordingSymbols.CALL_CALLBACK, classLoader)
+        if (callbackClass == null) {
+            Logger.printInfo {
+                "[Zalo][CallRecording] hookCallbackBase: class " +
+                    "${CallRecordingSymbols.CALL_CALLBACK} not found on this build"
+            }
+            return 0
+        }
+        return hookCallbackClass(callbackClass)
+    }
 
-    private fun hookCurrentCallback(classLoader: ClassLoader): Int =
-        loadOrNull(CallRecordingSymbols.CURRENT_CALLBACK_CLASS, classLoader)
-            ?.let { hookCallbackClass(it) } ?: 0
+    private fun hookCurrentCallback(classLoader: ClassLoader): Int {
+        val callbackClass = loadOrNull(CallRecordingSymbols.CURRENT_CALLBACK_CLASS, classLoader)
+        if (callbackClass == null) {
+            Logger.printInfo {
+                "[Zalo][CallRecording] hookCurrentCallback: obfuscated class " +
+                    "${CallRecordingSymbols.CURRENT_CALLBACK_CLASS} not found (expected off the " +
+                    "pinned build) - primary path still relies on hookCallbackBase"
+            }
+            return 0
+        }
+        return hookCallbackClass(callbackClass)
+    }
 
     private fun hookCallbackClass(callbackClass: Class<*>): Int {
         var count = 0
+        val matchedNames = mutableSetOf<String>()
+        val seenNames = mutableSetOf<String>()
         var current: Class<*>? = callbackClass
         while (current != null && current != Any::class.java) {
             for (method in current.declaredMethods) {
                 val name = method.name
+                seenNames.add(name)
                 if (Modifier.isAbstract(method.modifiers) ||
                     !CallRecordingLifecycle.observes(name)
                 ) continue
@@ -233,12 +327,27 @@ private object CallRecorder {
                     method.isAccessible = true
                     hookMember(method, callbackHook(method))
                     count++
+                    matchedNames.add(name)
                 } catch (t: Throwable) {
                     HOOKED_CALLBACKS.remove(signature)
                     Logger.printException({ "[Zalo] callback hook failed: $signature" }, t)
                 }
             }
             current = current.superclass
+        }
+        Logger.printInfo {
+            "[Zalo][CallRecording] hookCallbackClass(${callbackClass.name}): hooked=$count " +
+                "matched=$matchedNames"
+        }
+        if (count == 0) {
+            Logger.printInfo {
+                "[Zalo][CallRecording] hookCallbackClass(${callbackClass.name}): none of " +
+                    "CallRecordingLifecycle.observes()'s expected names " +
+                    "(onIncomingCall/onMakeCall/onCallConfirmed/onPreConnectSuccessful/" +
+                    "onCallAudioState/onCallVideoState/onCallState/onCallEnd/onCallErr/" +
+                    "onCallAutoHangup) matched any declared method. All declared method names " +
+                    "seen on this class hierarchy: $seenNames"
+            }
         }
         return count
     }
@@ -247,13 +356,24 @@ private object CallRecorder {
         before { param ->
             val methodName = method.name
             var session = SESSIONS[param.thisObject]
+            val hadSession = session != null
             // Zalo can reuse its callback after replacing the native peer. A new call
             // must resolve the current handle instead of reviving the retired session.
             if (session == null || CallRecordingLifecycle.beginsCall(methodName)) {
                 resolveCurrentSession(param.thisObject)?.let { session = it }
             }
             val s = session
-            if (s == null || s.deleted) return@before
+            Logger.printInfo {
+                "[Zalo][CallRecording] callback fired: $methodName hadSession=$hadSession " +
+                    "resolvedSession=${s != null} peerHandle=${s?.peerHandle} deleted=${s?.deleted}"
+            }
+            if (s == null || s.deleted) {
+                Logger.printInfo {
+                    "[Zalo][CallRecording] $methodName: no usable session, ignoring " +
+                        "(session==null=${s == null}, deleted=${s?.deleted})"
+                }
+                return@before
+            }
             when (methodName) {
                 "onIncomingCall" -> { s.direction = "incoming"; return@before }
                 "onMakeCall" -> { s.direction = "outgoing"; return@before }
@@ -263,6 +383,10 @@ private object CallRecorder {
             if (CallRecordingLifecycle.shouldStopAudio(methodName, state)) {
                 // ZRTC ignores recordAudio(false, ...) after its controller leaves the
                 // confirmed state. Stop inside this before-hook.
+                Logger.printInfo {
+                    "[Zalo][CallRecording] $methodName state=$state -> stopping " +
+                        "(peerHandle=${s.peerHandle})"
+                }
                 stop(s, methodName)
                 return@before
             }
@@ -276,6 +400,10 @@ private object CallRecorder {
                     s.confirmed, s.audioConnected
                 )
             }
+            Logger.printInfo {
+                "[Zalo][CallRecording] $methodName state=$state confirmed=${s.confirmed} " +
+                    "audioConnected=${s.audioConnected} started=${s.started} shouldStart=$shouldStart"
+            }
             if (shouldStart) start(s, methodName)
         }
     }
@@ -288,14 +416,33 @@ private object CallRecorder {
         val stateField = CallRecordingSymbols.ACTIVITY_CALL_STATE_FIELD
         val connectedMethod = CallRecordingSymbols.ACTIVITY_CONNECTED_METHOD
         for (className in CallRecordingSymbols.CALL_ACTIVITIES) {
-            val activityClass = loadOrNull(className, classLoader) ?: continue
-            if (!Activity::class.java.isAssignableFrom(activityClass)) continue
+            val activityClass = loadOrNull(className, classLoader)
+            if (activityClass == null) {
+                Logger.printInfo {
+                    "[Zalo][CallRecording] hookActivities: class $className not found on this build"
+                }
+                continue
+            }
+            if (!Activity::class.java.isAssignableFrom(activityClass)) {
+                Logger.printInfo {
+                    "[Zalo][CallRecording] hookActivities: $className resolved but is not an " +
+                        "Activity subclass on this build, skipping"
+                }
+                continue
+            }
             if (readyMethod.isNotEmpty()) {
-                count += hookAllByName(activityClass, readyMethod) {
+                val readyHooked = hookAllByName(activityClass, readyMethod) {
                     after { param ->
                         if (stateField.isEmpty() || connectedMethod.isEmpty()) return@after
                         val callState = param.thisObject.getObjectFieldOrNull(stateField)
-                            ?: return@after
+                        if (callState == null) {
+                            Logger.printInfo {
+                                "[Zalo][CallRecording] hookActivities: field $stateField not " +
+                                    "found on ${param.thisObject.javaClass.name} - obfuscated " +
+                                    "symbol pinned to 26.08.02 likely doesn't apply here"
+                            }
+                            return@after
+                        }
                         val connected = callState.callMethodOrNull(connectedMethod)
                         if (connected != true) return@after
                         val session = resolveCurrentSession(param.thisObject) ?: return@after
@@ -304,6 +451,13 @@ private object CallRecorder {
                             session.audioConnected = true
                         }
                         start(session, "activity_ready")
+                    }
+                }
+                count += readyHooked
+                if (readyHooked == 0) {
+                    Logger.printInfo {
+                        "[Zalo][CallRecording] hookActivities: method $readyMethod not found on " +
+                            "$className on this build"
                     }
                 }
             }
@@ -320,7 +474,13 @@ private object CallRecorder {
 
     private fun hookNotifications(): Int {
         val nmClass = loadOrNull("android.app.NotificationManager", CallRecorder::class.java.classLoader)
-            ?: return 0
+        if (nmClass == null) {
+            Logger.printInfo {
+                "[Zalo][CallRecording] hookNotifications: android.app.NotificationManager not " +
+                    "resolvable - caller name/number metadata will fall back to 'Zalo contact'"
+            }
+            return 0
+        }
         var count = 0
         count += hookAllByName(nmClass, "notify") {
             before { param ->
@@ -338,9 +498,27 @@ private object CallRecorder {
         synchronized(session) {
             if (session.deleted || session.started ||
                 !CallRecordingLifecycle.shouldStartAudio(session.confirmed, session.audioConnected)
-            ) return
-            val app = appContext ?: return
-            val native = recordMethod ?: return
+            ) {
+                Logger.printInfo {
+                    "[Zalo][CallRecording] start() skipped trigger=$trigger deleted=" +
+                        "${session.deleted} started=${session.started} confirmed=" +
+                        "${session.confirmed} audioConnected=${session.audioConnected}"
+                }
+                return
+            }
+            val app = appContext
+            if (app == null) {
+                Logger.printInfo { "[Zalo][CallRecording] start() skipped trigger=$trigger: no appContext" }
+                return
+            }
+            val native = recordMethod
+            if (native == null) {
+                Logger.printInfo {
+                    "[Zalo][CallRecording] start() skipped trigger=$trigger: recordMethod is " +
+                        "null (native $START_RECORD never resolved during install)"
+                }
+                return
+            }
             if (session.tempFile == null) {
                 session.startedAt = System.currentTimeMillis()
                 session.pendingName = CallRecordingOutput.newPendingName(
@@ -369,6 +547,10 @@ private object CallRecorder {
         val observed = CallRecordingMetadataStore.current()
         synchronized(session) {
             if (!session.started) {
+                Logger.printInfo {
+                    "[Zalo][CallRecording] stop() trigger=$trigger: session was never started, " +
+                        "nothing to finalize (peerHandle=${session.peerHandle})"
+                }
                 session.confirmed = false
                 session.audioConnected = false
                 return
@@ -398,8 +580,20 @@ private object CallRecorder {
             session.startedAt = 0L
             session.direction = "unknown"
         }
-        val app = appContext ?: return
-        if (tempFile == null) return
+        val app = appContext
+        if (app == null) {
+            Logger.printInfo { "[Zalo][CallRecording] stop() trigger=$trigger: no appContext, cannot finalize" }
+            return
+        }
+        if (tempFile == null) {
+            Logger.printInfo { "[Zalo][CallRecording] stop() trigger=$trigger: no tempFile, cannot finalize" }
+            return
+        }
+        Logger.printInfo {
+            "[Zalo][CallRecording] stop() trigger=$trigger: handing off to finalizeRecording " +
+                "file=${tempFile.absolutePath} exists=${tempFile.exists()} " +
+                "size=${if (tempFile.exists()) tempFile.length() else -1} direction=$direction"
+        }
         CallRecordingOutput.finalizeRecording(
             app, tempFile, startedAt, direction, peerUid,
             observed.displayName, observed.phoneNumber, null
@@ -432,10 +626,37 @@ private object CallRecorder {
         ) return null
         return try {
             val managerClass = loadOrNull(managerClassName, callback.javaClass.classLoader)
-                ?: return null
-            val manager = managerClass.callStaticMethodOrNull(instanceMethod) ?: return null
-            val container = manager.getObjectFieldOrNull(containerField) ?: return null
-            val peerHandle = container.getLongFieldOrNull(handleField) ?: return null
+            if (managerClass == null) {
+                Logger.printInfo {
+                    "[Zalo][CallRecording] resolveCurrentSession: class $managerClassName not " +
+                        "found on this build (pinned to 26.08.02) - fallback re-bind unavailable"
+                }
+                return null
+            }
+            val manager = managerClass.callStaticMethodOrNull(instanceMethod)
+            if (manager == null) {
+                Logger.printInfo {
+                    "[Zalo][CallRecording] resolveCurrentSession: static method " +
+                        "$managerClassName#$instanceMethod not found/failed on this build"
+                }
+                return null
+            }
+            val container = manager.getObjectFieldOrNull(containerField)
+            if (container == null) {
+                Logger.printInfo {
+                    "[Zalo][CallRecording] resolveCurrentSession: field $containerField not " +
+                        "found on ${manager.javaClass.name} on this build"
+                }
+                return null
+            }
+            val peerHandle = container.getLongFieldOrNull(handleField)
+            if (peerHandle == null) {
+                Logger.printInfo {
+                    "[Zalo][CallRecording] resolveCurrentSession: field $handleField not found " +
+                        "on ${container.javaClass.name} on this build"
+                }
+                return null
+            }
             if (peerHandle == 0L) return null
             val session = SESSIONS_BY_PEER.getOrPut(peerHandle) {
                 Session(peerHandle, PEER_PARTNERS[peerHandle])
@@ -443,6 +664,7 @@ private object CallRecorder {
             SESSIONS[callback] = session
             session
         } catch (t: Throwable) {
+            Logger.printException({ "[Zalo][CallRecording] resolveCurrentSession failed" }, t)
             null
         }
     }
@@ -537,6 +759,12 @@ private fun hookAllByName(clazz: Class<*>, name: String, block: HookScope.() -> 
             }
         }
         current = current.superclass
+    }
+    if (count == 0) {
+        Logger.printInfo {
+            "[Zalo][CallRecording] hookAllByName: no method named '$name' found anywhere in " +
+                "${clazz.name}'s hierarchy on this build"
+        }
     }
     return count
 }

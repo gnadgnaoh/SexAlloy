@@ -43,6 +43,9 @@ public final class CallRecordingContacts {
         if (phones.size() == 1) {
             resolvedPhone = phones.iterator().next();
         }
+        CallRecordingLog.d("resolve: peerUid=" + peerUid + " -> name=" + resolvedName
+                + " phone=" + (resolvedPhone.isEmpty() ? "(none)" : resolvedPhone)
+                + " candidatePhones=" + phones.size());
         return new Result(resolvedName, resolvedPhone);
     }
 
@@ -50,6 +53,7 @@ public final class CallRecordingContacts {
             Context context, String peerUid, String displayName, Set<String> phones) {
         File database = context.getDatabasePath("zalo");
         if (!database.isFile()) {
+            CallRecordingLog.w("queryProfiles: db file 'zalo' not found on this build");
             return "";
         }
         String foundName = "";
@@ -77,7 +81,9 @@ public final class CallRecordingContacts {
                     addPhone(phones, cursor.getString(1));
                 }
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            CallRecordingLog.w("queryProfiles: query against 'contact_profile_5' failed on this "
+                    + "build (schema likely changed): " + t);
         }
         return foundName;
     }
@@ -86,6 +92,7 @@ public final class CallRecordingContacts {
             Context context, String peerUid, String displayName, Set<String> phones) {
         File database = context.getDatabasePath("phone_contacts_v2");
         if (!database.isFile()) {
+            CallRecordingLog.w("querySyncedContacts: db file 'phone_contacts_v2' not found on this build");
             return;
         }
         try (SQLiteDatabase db = SQLiteDatabase.openDatabase(database.getAbsolutePath(), null,
@@ -109,7 +116,9 @@ public final class CallRecordingContacts {
                     addPhone(phones, normalized.isEmpty() ? cursor.getString(1) : normalized);
                 }
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            CallRecordingLog.w("querySyncedContacts: query against 'phone_contacts_v1' failed on "
+                    + "this build (schema likely changed): " + t);
         }
     }
 

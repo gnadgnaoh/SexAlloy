@@ -45,9 +45,14 @@ public final class CallRecordingMetadataStore {
     }
 
     public static void observe(Notification notification) {
-        if (notification == null || !isCallChannel(channelId(notification))) {
+        if (notification == null) {
             return;
         }
+        String channel = channelId(notification);
+        if (!isCallChannel(channel)) {
+            return;
+        }
+        CallRecordingLog.d("observe: matched call notification channelId=" + channel);
         Bundle extras = notification.extras;
         String title = value(extras, Notification.EXTRA_TITLE);
         String text = value(extras, Notification.EXTRA_TEXT);
@@ -56,7 +61,11 @@ public final class CallRecordingMetadataStore {
         String combined = join(title, text, subText, bigText);
         String phone = findPhone(combined);
         String displayName = preferredName(title, text, subText, phone);
-        latest = new Snapshot(displayName, phone, findPeerUid(extras), System.currentTimeMillis());
+        String peerUid = findPeerUid(extras);
+        CallRecordingLog.d("observe: extracted displayName=" + displayName + " phone="
+                + (phone.isEmpty() ? "(none)" : phone) + " peerUid="
+                + (peerUid.isEmpty() ? "(none)" : peerUid));
+        latest = new Snapshot(displayName, phone, peerUid, System.currentTimeMillis());
     }
 
     public static Snapshot current() {
