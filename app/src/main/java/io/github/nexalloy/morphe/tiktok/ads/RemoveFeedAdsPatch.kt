@@ -7,13 +7,32 @@ import io.github.nexalloy.callMethodOrNull
 import io.github.nexalloy.findClassOrNull
 import io.github.nexalloy.hookMethod
 import io.github.nexalloy.patch
+import org.luckypray.dexkit.wrap.DexMethod
 
-private const val TAG = "[TikTok ads]"
+internal const val TAG = "[TikTok ads]"
+
+/*
+ * Hook site keys of [AdsHookCache]. Each key holds the methods to hook for one hook point,
+ * including "none for this build", so no lookup is repeated on a later launch.
+ */
+private const val KEY_FETCH_FEED_LIST = "fetchFeedList"
+private const val KEY_INSERT_ITEM_LIST = "insertItemList"
+private const val KEY_COLD_START_CACHE = "coldStartCache"
+private const val KEY_VIDEO_GRID_FILTERS = "videoGridFilters"
+private const val KEY_PROFILE_RESULT_CALLBACKS = "profileResultCallbacks"
+private const val KEY_TALENT_AD_CALLBACKS = "talentProfileAds"
+private const val KEY_TALENT_AD_EVENT = "talentProfileAdEvent"
 
 /**
  * Installs every feed hook once; [RemoveFeedAds] and [HidePromotedMusicVideos] only switch the
  * predicates on. Hook points are independent: one that no longer resolves after a TikTok update
  * is logged and skipped, the patch only fails when the For You response hook itself is gone.
+ *
+ * Startup cost: every lookup goes through [AdsHookCache], which also remembers the hook points
+ * that resolve to nothing on this build (split installs and region builds have several). DexKit
+ * parses the whole TikTok APK on its first query of a launch, so one unremembered lookup is
+ * enough to pay that parse on every cold start; with all of them on file the patch installs from
+ * descriptors and the DexKit bridge is never opened.
  *
  * Split installs (Play Store / APKM bundles of the Asia build): NexAlloy's DexKit scans base.apk
  * only, so code living in feature splits (Following feed, detail pager) is resolved by its kept
@@ -22,6 +41,7 @@ private const val TAG = "[TikTok ads]"
 internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
     AwemeAdFilter.init(classLoader)
 
+    val cache = AdsHookCache(this)
     val installed = mutableListOf<String>()
     val skipped = mutableListOf<String>()
 
@@ -31,9 +51,19 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
             .onFailure { skipped += "$label (${it.javaClass.simpleName}: ${it.message})" }
     }
 
+    /**
+     * Cheap guard for the two talent-ad hook points: without the model class nothing can read its
+     * ad list, and both lookups behind it are dex-wide scans. Only evaluated while resolving.
+     */
+    val talentAdModelPresent by lazy(LazyThreadSafetyMode.NONE) {
+        (TALENT_AD_RESULT_CLASS.findClassOrNull(classLoader) != null).also {
+            if (!it) Logger.printInfo { "$TAG ProfileTalentShareAdResult absent on this build" }
+        }
+    }
+
     // region For You
 
-    val feedApis = ::feedApiFetchFeedListFingerprints.dexMethodList
+    val feedApis = cache.resolve(KEY_FETCH_FEED_LIST) { ::feedApiFetchFeedListFingerprints.dexMethodList }
     check(feedApis.isNotEmpty()) { "IFeedApi.fetchFeedList implementation not found" }
     feedApis.forEach {
         it.hookMethod {
@@ -46,13 +76,24 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
         val filterPayload: IHookCallback = { param ->
             filterSingleListField(param.args.firstOrNull(), "insertItemList")
         }
-        runCatching { FeedInsertItemListFingerprint.hookMethod { before(filterPayload) } }
-            .getOrElse { FeedInsertItemListByStructureFingerprint.hookMethod { before(filterPayload) } }
+        val methods = cache.resolve(KEY_INSERT_ITEM_LIST) {
+            val method = runCatching { FeedInsertItemListFingerprint.dexMethod }.getOrNull()
+                ?: runCatching { FeedInsertItemListByStructureFingerprint.dexMethod }.getOrNull()
+            method?.let(::listOf).orEmpty()
+        }
+        check(methods.isNotEmpty()) { "BaseListFragmentPanel.insertItemList not found" }
+        methods.forEach { it.hookMethod { before(filterPayload) } }
     }
 
     optional("coldStartCache") {
-        ColdStartFeedCacheFingerprint.hookMethod {
-            after { param -> filterFeedItemList(param.result, "coldStartCache") }
+        val methods = cache.resolve(KEY_COLD_START_CACHE) {
+            runCatching { ColdStartFeedCacheFingerprint.dexMethod }.getOrNull()?.let(::listOf).orEmpty()
+        }
+        check(methods.isNotEmpty()) { "cold start FeedItemList getter not found" }
+        methods.forEach {
+            it.hookMethod {
+                after { param -> filterFeedItemList(param.result, "coldStartCache") }
+            }
         }
     }
 
@@ -61,7 +102,7 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
     // region Profile
 
     optional("videoGrids") {
-        val filters = ::videoGridAdListFilterFingerprints.dexMethodList
+        val filters = cache.resolve(KEY_VIDEO_GRID_FILTERS) { ::videoGridAdListFilterFingerprints.dexMethodList }
         if (filters.isNotEmpty()) {
             filters.forEach {
                 it.hookMethod {
@@ -74,7 +115,7 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
                 }
             }
         } else {
-            val callbacks = ::profileResultCallbackFingerprints.dexMethodList
+            val callbacks = cache.resolve(KEY_PROFILE_RESULT_CALLBACKS) { ::profileResultCallbackFingerprints.dexMethodList }
             check(callbacks.isNotEmpty()) { "no grid list filter and no result callback found" }
             callbacks.forEach {
                 it.hookMethod {
@@ -88,7 +129,9 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
     }
 
     optional("talentProfileAds") {
-        val callbacks = ::talentProfileAdsCallbackFingerprints.dexMethodList
+        val callbacks = cache.resolve(KEY_TALENT_AD_CALLBACKS) {
+            if (talentAdModelPresent) ::talentProfileAdsCallbackFingerprints.dexMethodList else emptyList()
+        }
         check(callbacks.isNotEmpty()) { "ProfileTalentShareAdResult reader not found" }
         callbacks.forEach {
             it.hookMethod {
@@ -101,22 +144,26 @@ internal val TikTokFeedFilterHooks = patch(name = "<TikTokFeedFilterHooks>") {
         val filterEvent: IHookCallback = { param ->
             filterSingleListField(param.args.firstOrNull(), "talentProfileAdEvent")
         }
-        val byName = DETAIL_FRAGMENT_CLASS.findClassOrNull(classLoader)?.declaredMethods
-            ?.filter { it.name == "onTalentProfileAdEvent" && it.parameterCount == 1 }
-            .orEmpty()
-        if (byName.isNotEmpty()) {
-            byName.forEach { it.hookMethod { before(filterEvent) } }
-        } else {
-            val found = ::talentProfileAdEventSubscriberFingerprints.dexMethodList
-            check(found.isNotEmpty()) { "onTalentProfileAdEvent not found" }
-            found.forEach { it.hookMethod { before(filterEvent) } }
+        val methods = cache.resolve(KEY_TALENT_AD_EVENT) {
+            if (!talentAdModelPresent) {
+                emptyList()
+            } else {
+                val byName = DETAIL_FRAGMENT_CLASS.findClassOrNull(classLoader)?.declaredMethods
+                    ?.filter { it.name == "onTalentProfileAdEvent" && it.parameterCount == 1 }
+                    .orEmpty()
+                if (byName.isNotEmpty()) byName.map { DexMethod(it) }
+                else ::talentProfileAdEventSubscriberFingerprints.dexMethodList
+            }
         }
+        check(methods.isNotEmpty()) { "onTalentProfileAdEvent not found" }
+        methods.forEach { it.hookMethod { before(filterEvent) } }
     }
 
     // endregion
 
     optional("followingFeed") { hookFollowingFeed() }
 
+    cache.markComplete()
     Logger.printInfo { "$TAG installed=[${installed.joinToString()}] skipped=[${skipped.joinToString("; ")}]" }
 }
 
@@ -175,6 +222,8 @@ private fun logRemoved(source: String, removed: Int) {
  *
  * The post-processor walks getItems() by index ~40 times before handing the list to the adapter,
  * so an instance is only cleaned on its first read (API / cache layer) and never afterwards.
+ *
+ * Reflection only: no DexKit lookup, so this hook point costs nothing at startup.
  */
 private fun PatchExecutor.hookFollowingFeed() {
     val followFeedList = classLoader.loadClass(FOLLOW_FEED_LIST_CLASS)
