@@ -1,0 +1,39 @@
+package io.github.nexalloy.morphe.twitter
+
+import io.github.nexalloy.Patch
+import io.github.nexalloy.morphe.twitter.ads.timelineEntryHook.HideAds
+import io.github.nexalloy.morphe.twitter.ads.timelineEntryHook.HideRecommendationItems
+import io.github.nexalloy.morphe.twitter.dm.HideReadReceipts
+import io.github.nexalloy.morphe.twitter.dm.HideTyping
+import io.github.nexalloy.morphe.twitter.dm.KeepDisappearingMessages
+import io.github.nexalloy.morphe.twitter.dm.KeepUnsentMessages
+import io.github.nexalloy.morphe.twitter.dm.ShowEditHistory
+import io.github.nexalloy.morphe.twitter.link.unshorten.NoShortenedUrl
+import io.github.nexalloy.morphe.twitter.misc.blur.DisableBlur
+import io.github.nexalloy.morphe.twitter.premium.downloads.UnlockDownloads
+import io.github.nexalloy.morphe.twitter.timeline.forceTranslate.ForceTranslate
+import io.github.nexalloy.morphe.twitter.timeline.removePremiumUpsell.RemovePremiumUpsell
+import io.github.nexalloy.morphe.twitter.timeline.showpollresults.ShowPollResults
+import io.github.nexalloy.morphe.twitter.timeline.banner.HideBanner
+
+val TwitterPatches: Array<Patch> = arrayOf(
+    HideAds,
+    HideRecommendationItems,
+
+    NoShortenedUrl,
+
+    RemovePremiumUpsell,
+    UnlockDownloads,
+
+    ForceTranslate,
+    ShowPollResults,
+    HideBanner,
+
+    DisableBlur,
+
+    HideReadReceipts,
+    HideTyping,
+    KeepDisappearingMessages,
+    KeepUnsentMessages,
+    ShowEditHistory,
+)

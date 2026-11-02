@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pn_downloading">Downloading…</string>
+    <string name="pn_saved">Saved to Download/Pinterest</string>
+    <string name="pn_failed">Couldn\'t save: %1$s</string>
+</resources>

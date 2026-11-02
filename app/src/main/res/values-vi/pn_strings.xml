@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pn_downloading">Đang tải xuống…</string>
+    <string name="pn_saved">Đã lưu vào Download/Pinterest</string>
+    <string name="pn_failed">Không lưu được: %1$s</string>
+</resources>
