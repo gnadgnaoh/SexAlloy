@@ -27,25 +27,14 @@ internal fun valueOfType(host: Any?, type: Class<*>): Any? {
     return null
 }
 
-private fun firstHttpString(obj: Any): String? {
-    var c: Class<*>? = obj.javaClass
-    while (c != null && c != Any::class.java) {
-        for (f in c.declaredFields) {
-            if (Modifier.isStatic(f.modifiers) || f.type != String::class.java) continue
-            val v = runCatching { f.isAccessible = true; f.get(obj) as? String }.getOrNull()
-            if (v != null && v.startsWith("http")) return v
-        }
-        c = c.superclass
-    }
-    return null
-}
-
 val DownloadVoiceMessages = patch(
     name = "Download voice messages",
     description = "Adds Save to the menu you get when you hold a voice message in a chat. It saves the recording as an audio file.",
 ) {
     val voiceField = ::messageVoiceMediaField.field.apply { isAccessible = true }
-    val playable = ::voicePlayableMethod.method.apply { isAccessible = true }
+    val voiceMedia = ::voiceMediaField.field.apply { isAccessible = true }
+    val audioInfo = ::mediaAudioInfoMethod.method.apply { isAccessible = true }
+    val audioSrc = ::audioSrcMethod.method.apply { isAccessible = true }
     val messageClass = voiceField.declaringClass
     val saveFlag = ::messageMenuActionGuardsFingerprint.fieldList.chunked(2).firstOrNull { pair ->
         val action = pair.getOrNull(1) ?: return@firstOrNull false
@@ -74,7 +63,9 @@ val DownloadVoiceMessages = patch(
                 ?: AndroidAppHelper.currentApplication() ?: return@before
             param.result = null
             MediaSaver.executor.submit {
-                val url = runCatching { playable.invoke(null, voice)?.let(::firstHttpString) }.getOrNull()
+                val url = runCatching {
+                    voiceMedia.get(voice)?.let { audioInfo.invoke(it) }?.let { audioSrc.invoke(it) } as? String
+                }.getOrNull()?.takeIf { it.startsWith("http") }
                 if (url == null) return@submit MediaSaver.toast(ctx, I18n.t(ctx, R.string.ig_toast_no_audio))
                 MediaSaver.toast(ctx, I18n.t(ctx, R.string.ig_toast_downloading_audio))
                 runCatching { MediaSaver.saveAudio(ctx, url, "instagram_voice_${System.currentTimeMillis()}.m4a", null) }

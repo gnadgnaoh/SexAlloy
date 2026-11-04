@@ -18,7 +18,6 @@ val ShowLastActive = patch(
 ) {
     val text = ::presenceTextMethod.method
     val lastActive = ::presenceLastActiveField.field.apply { isAccessible = true }
-    val activeCheck = ::presenceActiveCheckMethod.method.apply { isAccessible = true }
     val window = ::presenceActiveWindowField.field.apply { isAccessible = true }
 
     text.hookMethod {
@@ -28,7 +27,7 @@ val ShowLastActive = patch(
                 val item = (param.args[1] as? List<*>)?.firstOrNull() ?: return@runCatching
                 val last = lastActive.getLong(item).takeIf { it > 0 } ?: return@runCatching
                 val now = System.currentTimeMillis()
-                if (activeCheck.invoke(null, item, now) == true || now - last <= window.getLong(null)) return@runCatching
+                if (now - last <= window.getLong(null)) return@runCatching
                 val res = param.args[0] as Resources
                 param.result = exact(res, last) ?: return@runCatching
             }

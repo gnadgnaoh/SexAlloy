@@ -148,30 +148,29 @@ internal val messageEphemeralLifetimeField = findFieldDirect { messageField("mes
 
 internal val messageExpirationTimestampField = findFieldDirect { messageField("message_expiration_timestamp_ms") }
 
-private fun DexKitBridge.voiceClassName(): String = once("voiceClassName") {
-    messageField("voice_media").typeName
+internal val voiceMediaField = findFieldDirect {
+    findField { matcher { declaredClass(messageField("voice_media").typeName); type = "com.instagram.feed.media.Media" } }.single()
 }
 
-internal val voiceLocalPathMethod = findMethodDirect {
+internal val mediaAudioInfoMethod = findMethodDirect {
     findMethod {
+        matcher { declaredClass("com.instagram.feed.media.Media"); returnType = AUDIO_INFO; paramCount = 0 }
+    }.single { !it.isStaticMethod() }
+}
+
+internal val audioSrcMethod = findMethodDirect {
+    val name = findMethod {
         matcher {
-            declaredClass(voiceClassName())
-            paramCount = 0
+            declaredClass("com.instagram.api.schemas.ImmutablePandoAudioInfo")
             returnType = STRING
+            paramCount = 0
+            usingNumbers("audio_src".hashCode())
         }
-    }.single()
+    }.single { !it.isStaticMethod() }.name
+    findMethod { matcher { declaredClass(AUDIO_INFO); this.name = name; returnType = STRING; paramCount = 0 } }.single()
 }
 
-internal val voicePlayableMethod = findMethodDirect {
-    val voice = voiceClassName()
-    val localPath = voiceLocalPathMethod(this)
-    findMethod {
-        matcher {
-            paramTypes(voice)
-            addInvoke(localPath.descriptor)
-        }
-    }.single { it.className != voice && it.returnTypeName != "void" && it.isStaticMethod() }
-}
+private const val AUDIO_INFO = "com.instagram.api.schemas.AudioInfoIntf"
 
 private fun MethodData.isStaticMethod() = java.lang.reflect.Modifier.isStatic(modifiers)
 
@@ -190,13 +189,6 @@ internal val presenceTextMethod = findMethodDirect {
 
 internal val presenceLastActiveField = findFieldDirect {
     presenceTextMethod().instructions.first { it.opcode == OP_IGET_WIDE }.fieldRef!!
-}
-
-internal val presenceActiveCheckMethod = findMethodDirect {
-    val item = presenceLastActiveField().declaredClassName
-    presenceTextMethod().instructions.mapNotNull { it.methodRef }.first {
-        it.isStaticMethod() && it.returnTypeName == "boolean" && it.paramTypeNames == listOf(item, "long")
-    }
 }
 
 internal val presenceActiveWindowField = findFieldDirect {
