@@ -39,27 +39,14 @@ val userFullNameGetterFingerprint = findMethodDirect { pandoGetter(USER, "full_n
 
 val userProfilePicGetterFingerprint = findMethodDirect { pandoGetter(USER, "profile_pic_url", null) }
 
-private fun DexKitBridge.highQualityPref(): MethodData = findMethod {
-    matcher {
-        returnType = "boolean"
-        paramCount = 1
-        usingEqStrings("high_quality_media_upload")
-        addInvoke { name = "getInt"; paramTypes("java.lang.String", "int") }
-    }
-}.single { Modifier.isStatic(it.modifiers) }
-
 val uploadHighQualityCheckFingerprint = findMethodDirect {
-    val pref = highQualityPref()
-    findMethod {
-        matcher {
-            returnType = "boolean"
-            paramCount = 0
-            addInvoke(pref.descriptor)
+    val owner = findClass {
+        matcher { addField { type = SHARE_TYPE }; addMethod { usingNumbers(9_000_000) } }
+    }.single().name
+    findMethod { matcher { declaredClass = owner; returnType = "boolean"; paramCount = 0 } }.single { m ->
+        !Modifier.isStatic(m.modifiers) && m.invokes.any { pref ->
+            Modifier.isStatic(pref.modifiers) && pref.returnTypeName == "boolean" && pref.paramCount == 1 &&
+                pref.invokes.any { it.name == "getInt" && it.paramTypeNames == listOf("java.lang.String", "int") }
         }
-    }.single { m ->
-        val owner = m.declaredClass ?: return@single false
-        !Modifier.isStatic(m.modifiers) &&
-            owner.fields.count { !Modifier.isStatic(it.modifiers) && it.typeName == SHARE_TYPE } == 1 &&
-            findMethod { matcher { declaredClass(owner.name); usingNumbers(9_000_000); addInvoke(m.descriptor) } }.isNotEmpty()
     }
 }
