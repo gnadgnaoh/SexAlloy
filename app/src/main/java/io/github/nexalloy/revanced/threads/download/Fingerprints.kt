@@ -9,12 +9,13 @@ import org.luckypray.dexkit.result.MethodData
 import java.lang.reflect.Modifier
 
 internal const val MEDIA = "com.instagram.feed.media.Media"
+internal const val MEDIA_CACHE = "com.instagram.feed.media.MediaCache"
+internal const val FUNCTION0 = "kotlin.jvm.functions.Function0"
 private const val PANDO_VIDEO_VERSION = "com.instagram.api.schemas.ImmutablePandoVideoVersion"
 private const val POST_MENU_NOTE = "com.instagram.barcelona.feed.post.actionmenu.PostActionMenuSheet.<anonymous> (PostActionMenuSheet.kt:"
 private const val MEDIA_MENU_NOTE = "com.instagram.barcelona.postmedia.ui.MediaActionMenuSheet.<anonymous> (MediaActionMenuSheet.kt:"
 private const val MENU_ICON_NOTE = "com.instagram.barcelona.common.ui.listcell.getMenuRowEndIcon (BdsListCell.kt:"
 
-private const val OP_CHECK_CAST = 0x1f
 private const val OP_INSTANCE_OF = 0x20
 private const val OP_SGET_OBJECT = 0x62
 private const val OP_INVOKE_VIRTUAL = 0x6e
@@ -95,9 +96,8 @@ val postMenuCloseFingerprint = findMethodDirect {
     findMethod { matcher { name = "invoke"; usingEqStrings("copy_link") } }.mapNotNull { method ->
         val code = method.instructions
         val at = code.indexOfFirst { it.string == "copy_link" }
-        val controller = (at downTo 0).map { code[it] }.firstOrNull { it.opcode == OP_CHECK_CAST }?.classRef?.name
-            ?: return@mapNotNull null
         val after = code.drop(at)
+        val controller = after.firstNotNullOfOrNull { it.call() }?.declaredClassName ?: return@mapNotNull null
         val shared = after.indexOfFirst { insn -> insn.call()?.let { it.isConstructor && MEDIA in it.paramTypeNames } == true }
         if (shared < 0) return@mapNotNull null
         after.drop(shared).firstOrNull {
@@ -120,10 +120,21 @@ val versionUrlFingerprint = findMethodDirect { pandoGetter(PANDO_VIDEO_VERSION, 
 val versionWidthFingerprint = findMethodDirect { pandoGetter(PANDO_VIDEO_VERSION, "width", "java.lang.Integer") }
 val versionHeightFingerprint = findMethodDirect { pandoGetter(PANDO_VIDEO_VERSION, "height", "java.lang.Integer") }
 
-val mediaViewerTopBarInitFingerprint = findMethodDirect {
-    val owner = findMethod {
-        matcher { name = "invoke"; usingStrings("com.instagram.barcelona.feed.mediaviewer.ui.MediaViewerTopBar.<anonymous> (MediaViewerTopBar.kt:") }
-    }.single().declaredClassName
-    findMethod { matcher { declaredClass = owner; name = "<init>"; paramCount = 11 } }.single()
-        .also { check(it.paramTypeNames[2] == "kotlin.jvm.functions.Function0" && it.paramTypeNames[9] == "boolean") }
+val mediaCacheGetFingerprint = findMethodDirect {
+    findMethod {
+        matcher {
+            declaredClass(MEDIA_CACHE)
+            paramTypes("java.lang.String")
+            returnType = MEDIA
+            addInvoke("Ljava/util/Map;->get(Ljava/lang/Object;)Ljava/lang/Object;")
+        }
+    }.single { !Modifier.isStatic(it.modifiers) && it.usingStrings.isEmpty() }
+}
+
+val mediaViewerTopBarFingerprint = findMethodDirect {
+    findMethod {
+        matcher { usingStrings("com.instagram.barcelona.feed.mediaviewer.ui.MediaViewerTopBar (MediaViewerTopBar.kt:") }
+    }.single { Modifier.isStatic(it.modifiers) && it.name != "invoke" }.also { m ->
+        check(m.paramTypeNames.count { it == FUNCTION0 } >= 2 && m.paramTypeNames.count { it == "boolean" } >= 2)
+    }
 }

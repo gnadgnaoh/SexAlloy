@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import app.morphe.extension.shared.Logger
 import io.github.nexalloy.R
+import io.github.nexalloy.hookMethod
 import io.github.nexalloy.patch
 import io.github.nexalloy.revanced.instagram.download.DownloadUi
 import io.github.nexalloy.revanced.threads.tracking.mediaCodeFingerprint
@@ -93,29 +94,33 @@ val SaveVideos = patch(
         row.invoke(null, composer, modifier, style, icon, label)
     }
 
-    val mediaCache = classLoader.loadClass("com.instagram.feed.media.MediaCache")
-    val cacheGet = mediaCache.getMethod("get", String::class.java)
+    val cacheGet = ::mediaCacheGetFingerprint.method.apply { isAccessible = true }
+    val mediaCache = cacheGet.declaringClass
     val stateClass = classLoader.loadClass("androidx.compose.runtime.MutableState")
+    val stateValue = stateClass.getMethod("getValue")
+    val topBar = ::mediaViewerTopBarFingerprint.method
+    val topBarTypes = topBar.parameterTypes.withIndex()
+    val menuClick = topBarTypes.filter { it.value == function0 }[1].index
+    val menuShown = topBarTypes.filter { it.value == java.lang.Boolean.TYPE }[1].index
     runCatching {
-        ::mediaViewerTopBarInitFingerprint.hookMethod {
+        topBar.hookMethod {
             before { param ->
-                if (param.args[9] == true) return@before
-                val open = param.args[2] ?: return@before
+                if (param.args[menuShown] == true) return@before
+                val open = param.args[menuClick] ?: return@before
                 runCatching {
                     val postId = fieldOfType(open, String::class.java) as? String ?: return@runCatching
-                    val cache = open.javaClass.declaredFields.asSequence()
-                        .filter { !Modifier.isStatic(it.modifiers) && !it.type.isPrimitive }
-                        .mapNotNull { f -> f.isAccessible = true; f.get(open)?.let { fieldOfType(it, mediaCache) } }
-                        .firstOrNull() ?: return@runCatching
+                    val cache = valueOfType(open, Any::class.java) { fieldOfType(it, mediaCache) != null }
+                        ?.let { fieldOfType(it, mediaCache) } ?: return@runCatching
                     val post = cacheGet.invoke(cache, postId) ?: return@runCatching
-                    val index = (fieldOfType(open, stateClass)?.let { stateClass.getMethod("getValue").invoke(it) } as? Number)?.toInt() ?: 0
+                    val index = (valueOfType(open, stateClass) { stateValue.invoke(it) is Number }
+                        ?.let { stateValue.invoke(it) } as? Number)?.toInt() ?: 0
                     val pages = reader.pages(post)
                     val page = pages.getOrNull(index) ?: pages.first()
                     if (reader.videoPages(page).isEmpty()) return@runCatching
-                    val activity = fieldOfType(open, Activity::class.java) as? Activity
+                    val activity = valueOfType(open, Activity::class.java) as? Activity
                     val number = if (pages.size > 1) pages.indexOf(page) + 1 else null
-                    param.args[9] = true
-                    param.args[2] = clickOf {
+                    param.args[menuShown] = true
+                    param.args[menuClick] = clickOf {
                         val ctx = activity ?: appContext
                         DownloadUi.showSheet(
                             ctx, ThreadsSaver.t(ctx, R.string.th_save_video), null,
@@ -244,6 +249,24 @@ internal fun fieldOfType(owner: Any, type: Class<*>): Any? {
                 ?.apply { isAccessible = true },
         )
     }.orElse(null) ?: return null
+    return field.get(owner)
+}
+
+private val valueFieldCache = java.util.concurrent.ConcurrentHashMap<Pair<Class<*>, Class<*>>, Field>()
+private val objectFieldCache = java.util.concurrent.ConcurrentHashMap<Class<*>, List<Field>>()
+
+internal fun valueOfType(owner: Any, type: Class<*>, accept: (Any) -> Boolean = { true }): Any? {
+    val key = owner.javaClass to type
+    valueFieldCache[key]?.let { cached ->
+        return cached.get(owner)?.takeIf { type.isInstance(it) && accept(it) }
+    }
+    val fields = objectFieldCache.getOrPut(owner.javaClass) {
+        generateSequence(owner.javaClass) { it.superclass }.flatMap { it.declaredFields.asSequence() }
+            .filter { !Modifier.isStatic(it.modifiers) && !it.type.isPrimitive }
+            .onEach { it.isAccessible = true }.toList()
+    }
+    val field = fields.firstOrNull { f -> f.get(owner)?.let { type.isInstance(it) && accept(it) } == true } ?: return null
+    valueFieldCache[key] = field
     return field.get(owner)
 }
 
