@@ -4,13 +4,12 @@ import io.github.nexalloy.morphe.findMethodDirect
 import io.github.nexalloy.morphe.findMethodListDirect
 import org.luckypray.dexkit.query.enums.StringMatchType
 
-val crashReportingDisabledFingerprint = findMethodDirect {
+val sentryEnabledFingerprint = findMethodDirect {
+    val options = findClass {
+        matcher { className("io.sentry.android.core.SentryAndroidOptions", StringMatchType.Equals) }
+    }.single().superClass!!.name
     findMethod {
-        matcher {
-            declaredClass("com.discord.crash_reporting.CrashReporting", StringMatchType.Equals)
-            name = "isDisabled"
-            returnType = "boolean"
-        }
+        matcher { declaredClass(options, StringMatchType.Equals); name = "isEnabled"; returnType = "boolean"; paramCount = 0 }
     }.single()
 }
 

@@ -17,7 +17,7 @@ val DisableTracking = patch(
         url.contains(SENTRY_HOST) || TRACKING_PATHS.any { path.endsWith(it) || path.contains("$it/") }
     }
     dependsOn(DiscordRequests)
-    ::crashReportingDisabledFingerprint.hookMethod(XC_MethodReplacement.returnConstant(true))
+    ::sentryEnabledFingerprint.hookMethod(XC_MethodReplacement.returnConstant(false))
     ::enableTouchLoggingFingerprint.hookMethod(XC_MethodReplacement.DO_NOTHING)
     ::appsFlyerStartFingerprint.dexMethodList.forEach { it.hookMethod(XC_MethodReplacement.DO_NOTHING) }
     val empty = ::advertisingIdEmptyFingerprint.method.apply { isAccessible = true }
