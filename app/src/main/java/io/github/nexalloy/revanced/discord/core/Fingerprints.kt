@@ -4,7 +4,6 @@ import io.github.nexalloy.morphe.findMethodDirect
 import org.luckypray.dexkit.query.enums.StringMatchType
 
 private const val NETWORKING_MODULE = "com.facebook.react.modules.network.NetworkingModule"
-private const val NETWORK_EVENTS = "com.facebook.react.modules.network.NetworkEventUtil"
 
 val sendRequestFingerprint = findMethodDirect {
     findMethod {
@@ -15,20 +14,21 @@ val sendRequestFingerprint = findMethodDirect {
     }.single()
 }
 
+private const val REACT_CONTEXT = "com.facebook.react.bridge.ReactApplicationContext"
+private const val STRING = "java.lang.String"
+
+private fun org.luckypray.dexkit.DexKitBridge.networkEvent(event: String, vararg params: String) =
+    findMethod { matcher { usingEqStrings(event); paramTypes(REACT_CONTEXT, *params) } }
+        .single { java.lang.reflect.Modifier.isStatic(it.modifiers) }
+
 val responseReceivedFingerprint = findMethodDirect {
-    findMethod { matcher { declaredClass(NETWORK_EVENTS, StringMatchType.Equals); name = "onResponseReceived" } }.single()
+    networkEvent("didReceiveNetworkResponse", "int", STRING, STRING, "int", "java.util.Map", "long")
 }
 
 val dataReceivedFingerprint = findMethodDirect {
-    findMethod {
-        matcher {
-            declaredClass(NETWORK_EVENTS, StringMatchType.Equals)
-            name = "onDataReceived"
-            paramTypes(null, "int", "java.lang.String", "java.lang.String", "java.lang.String")
-        }
-    }.single()
+    networkEvent("didReceiveNetworkData", "int", STRING, STRING, STRING)
 }
 
 val requestSuccessFingerprint = findMethodDirect {
-    findMethod { matcher { declaredClass(NETWORK_EVENTS, StringMatchType.Equals); name = "onRequestSuccess" } }.single()
+    networkEvent("didCompleteNetworkResponse", "int", STRING, "long")
 }
