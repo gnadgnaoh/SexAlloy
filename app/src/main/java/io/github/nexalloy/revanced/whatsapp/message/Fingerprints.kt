@@ -29,7 +29,12 @@ val noneAckClassFingerprint = findClassDirect {
 }
 
 val statusRevokeFingerprint = findMethodDirect {
-    findMethod { matcher { usingEqStrings("RevokeStatusManager/double-revoke: re-issuing outgoing revoke for own batched status on primary") } }.single()
+    val result = findClass {
+        matcher { superClass = "java.lang.Enum"; addMethod { name = "<clinit>"; usingEqStrings("DIDNT_STORE") } }
+    }.single().name
+    findMethod {
+        matcher { returnType = result; usingStrings(listOf("RevokeStatusManager/"), StringMatchType.StartsWith) }
+    }.single()
 }
 
 val ephemeralValuesFingerprint = findMethodDirect {
