@@ -36,7 +36,15 @@ private val SIZE_SEGMENT = Regex("/\\d+x\\d*(_RS)?/")
 private const val FOLDER = "Pinterest"
 private const val MAX_DEPTH = 10
 private val FORCED = listOf("isVideo=" to false, "isStoryPin=" to false, "isImageDownloadAllowed=" to true, "isEligibleForCloseupSharesheetDownload=" to false)
-private val MP4_WIDTH = Regex("_(\\d+)w\\.mp4$")
+private val NAME_WIDTH = Regex("_(\\d+)w(?=[_.])")
+private val KEY_TIER = Regex("_T(\\d+)(?:_|$)")
+private val NAME_TIER = Regex("_t(\\d+)\\.mp4$")
+private const val M3U8 = ".m3u8"
+private const val HLS_SEGMENT = "/hls/"
+private const val HLS_FALLBACK = "/720p/"
+private const val CAROUSEL_KEY = "carousel_data"
+private const val SLOTS_KEY = "carousel_slots"
+private const val INDEX_KEY = "index"
 private const val RESTORE = "nexalloy-restore"
 
 private object PinMedia {
@@ -73,32 +81,58 @@ private object PinMedia {
         return listOfNotNull(orig, rewritten, largest).distinct()
     }
 
-    fun videoUrl(pin: Any): String? {
-        var best: String? = null
-        var bestWidth = -1
+    private data class Mp4(val link: String, val nameWidth: Int, val tier: Int, val fieldWidth: Int)
+
+    private val rank = compareBy<Mp4>({ it.nameWidth }, { it.tier }, { it.fieldWidth })
+
+    fun videoUrls(pin: Any): List<String> {
+        val mp4s = mutableListOf<Mp4>()
+        val hls = linkedSetOf<String>()
         val seen = IdentityHashMap<Any, Boolean>()
-        fun visit(node: Any?, depth: Int) {
+        fun visit(node: Any?, depth: Int, key: String?) {
             if (node == null || depth > MAX_DEPTH || seen.put(node, true) != null) return
             when (node) {
-                is List<*> -> node.forEach { visit(it, depth + 1) }
-                is Map<*, *> -> node.values.forEach { visit(it, depth + 1) }
+                is List<*> -> node.forEach { visit(it, depth + 1, key) }
+                is Map<*, *> -> node.forEach { (k, v) -> visit(v, depth + 1, k as? String ?: key) }
                 else -> {
                     val type = node.javaClass
                     if (!type.name.startsWith(MODEL_PACKAGE)) return
                     val fields = keysOf(type)
                     val link = fields[URL_KEY]?.get(node) as? String
-                    if (link != null && link.substringBefore('?').endsWith(MP4)) {
-                        val width = MP4_WIDTH.find(link.substringBefore('?'))?.groupValues?.get(1)?.toIntOrNull()
-                            ?: (fields[WIDTH_KEY]?.get(node) as? Number)?.toInt() ?: 0
-                        if (width > bestWidth) { best = link; bestWidth = width }
+                    val bare = link?.substringBefore('?')
+                    if (link != null && bare != null && bare.endsWith(MP4)) {
+                        val name = bare.substringAfterLast('/')
+                        val mp4 = Mp4(
+                            link,
+                            NAME_WIDTH.find(name)?.groupValues?.get(1)?.toIntOrNull() ?: 0,
+                            key?.let { KEY_TIER.find(it) }?.groupValues?.get(1)?.toIntOrNull()
+                                ?: NAME_TIER.find(name)?.groupValues?.get(1)?.toIntOrNull() ?: 0,
+                            (fields[WIDTH_KEY]?.get(node) as? Number)?.toInt() ?: 0,
+                        )
+                        mp4s += mp4
+                    } else if (link != null && bare != null && bare.endsWith(M3U8)) {
+                        hls += link
                     }
-                    nestedOf(type).forEach { visit(it.get(node), depth + 1) }
+                    nestedOf(type).forEach { f -> visit(f.get(node), depth + 1, key) }
                 }
             }
         }
-        visit(pin, 0)
-        return best
+        visit(pin, 0, null)
+        val best = mp4s.maxWithOrNull(rank)?.link
+        val derived = hls.filter { HLS_SEGMENT in it }.map { it.substringBefore('?').replace(HLS_SEGMENT, HLS_FALLBACK).removeSuffix(M3U8) + MP4 }
+        return (listOfNotNull(best) + derived).distinct()
     }
+
+    fun carouselSlot(pin: Any, current: (Any) -> Int?): Any? {
+        val carousel = keysOf(pin.javaClass)[CAROUSEL_KEY]?.get(pin) ?: return null
+        val fields = keysOf(carousel.javaClass)
+        val slots = (fields[SLOTS_KEY]?.get(carousel) as? List<*>).orEmpty()
+        if (slots.size < 2) return null
+        val index = current(pin) ?: (fields[INDEX_KEY]?.get(carousel) as? Number)?.toInt() ?: 0
+        return slots.getOrNull(index.coerceIn(0, slots.lastIndex))
+    }
+
+    fun candidates(media: Any): List<String> = videoUrls(media).ifEmpty { imageUrls(media) }
 }
 
 private object PinterestSaver {
@@ -120,7 +154,8 @@ private object PinterestSaver {
             val resolver = app.contentResolver
             var error: Throwable? = null
             for (link in candidates) {
-                val connection = runCatching { URL(link).openConnection() as HttpURLConnection }.getOrNull() ?: continue
+                val connection = runCatching { URL(link).openConnection() as HttpURLConnection }.getOrNull()
+                    ?: continue
                 try {
                     if (connection.responseCode != HttpURLConnection.HTTP_OK) continue
                     val (ext, mime) = mimeOf(link)
@@ -210,13 +245,25 @@ val EnableVideoDownload = patch(
         }
     }
 
+    val indexOf = ::carouselIndexFingerprint.method.apply { isAccessible = true }
+    var store: java.lang.ref.WeakReference<Any>? = null
+    indexOf.declaringClass.declaredConstructors.forEach { c ->
+        c.hookMethod { after { param -> store = java.lang.ref.WeakReference(param.thisObject) } }
+    }
+    indexOf.declaringClass.declaredMethods.filter { it.returnType == Void.TYPE && it.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType, String::class.java)) }
+        .forEach { m -> m.hookMethod { before { param -> if (store?.get() == null) store = java.lang.ref.WeakReference(param.thisObject) } } }
+    fun currentIndex(pin: Any): Int? = store?.get()?.let { runCatching { indexOf.invoke(it, pin) as? Int }.getOrNull() }
+
     ::downloadClickFingerprint.dexMethodList.forEach { click ->
         click.hookMethod {
             before { param ->
                 val ctx = param.args[0] as? Context ?: return@before
-                val field = pinFields[param.thisObject.javaClass] ?: fieldOfType(param.thisObject.javaClass, pinType)?.also { pinFields[param.thisObject.javaClass] = it } ?: return@before
+                val field = pinFields[param.thisObject.javaClass] ?: fieldOfType(param.thisObject.javaClass, pinType)?.also { pinFields[param.thisObject.javaClass] = it }
+                    ?: return@before
                 val pin = field.get(param.thisObject) ?: return@before
-                val candidates = PinMedia.videoUrl(pin)?.let(::listOf) ?: PinMedia.imageUrls(pin)
+                val slot = runCatching { PinMedia.carouselSlot(pin, ::currentIndex) }.getOrNull()
+                val candidates = slot?.let { runCatching { PinMedia.candidates(it) }.getOrNull() }?.takeIf { it.isNotEmpty() }
+                    ?: PinMedia.candidates(pin)
                 if (candidates.isEmpty()) return@before
                 PinterestSaver.save(ctx, candidates)
                 param.result = null

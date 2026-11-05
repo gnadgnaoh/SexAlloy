@@ -57,3 +57,18 @@ val downloadClickFingerprint = findMethodListDirect {
     findMethod { matcher { returnType = "void"; addInvoke(download.descriptor) } }
         .filter { m -> m.paramTypeNames.firstOrNull() == "android.content.Context" && classOf(m.className).fields.any { it.typeName == pin } }
 }
+
+val carouselIndexFingerprint = findMethodDirect {
+    val pin = pinClassFingerprint().name
+    findMethod {
+        matcher {
+            paramTypes(pin)
+            returnType = "int"
+            declaredClass {
+                fieldCount(1)
+                addField { type = "java.util.LinkedHashMap" }
+                addMethod { paramTypes("int", "java.lang.String"); returnType = "void" }
+            }
+        }
+    }.single()
+}
