@@ -29,7 +29,7 @@ private const val MP4 = ".mp4"
 private const val URL_KEY = "url"
 private const val WIDTH_KEY = "width"
 private const val IMAGES_KEY = "images"
-private const val ORIGINAL_KEY = "orig"
+private val ORIGINAL_KEYS = setOf("orig", "originals")
 private const val MEDIUM_IMAGE_KEY = "image_medium_url"
 private const val ORIGINALS = "/originals/"
 private val SIZE_SEGMENT = Regex("/\\d+x\\d*(_RS)?/")
@@ -75,15 +75,13 @@ private object PinMedia {
             val link = detailFields[URL_KEY]?.get(detail) as? String ?: return@mapNotNull null
             Triple(key as? String, link, (detailFields[WIDTH_KEY]?.get(detail) as? Number)?.toInt() ?: 0)
         }
-        val orig = sizes.firstOrNull { it.first == ORIGINAL_KEY }?.second
+        val orig = sizes.firstOrNull { it.first in ORIGINAL_KEYS }?.second
         val largest = sizes.maxByOrNull { it.third }?.second ?: fields[MEDIUM_IMAGE_KEY]?.get(pin) as? String
         val rewritten = largest?.let { SIZE_SEGMENT.replaceFirst(it, ORIGINALS) }
         return listOfNotNull(orig, rewritten, largest).distinct()
     }
 
-    private data class Mp4(val link: String, val nameWidth: Int, val tier: Int, val fieldWidth: Int)
-
-    private val rank = compareBy<Mp4>({ it.nameWidth }, { it.tier }, { it.fieldWidth })
+    private data class Mp4(val link: String, val rank: Mp4Rank)
 
     fun videoUrls(pin: Any): List<String> {
         val mp4s = mutableListOf<Mp4>()
@@ -101,14 +99,7 @@ private object PinMedia {
                     val link = fields[URL_KEY]?.get(node) as? String
                     val bare = link?.substringBefore('?')
                     if (link != null && bare != null && bare.endsWith(MP4)) {
-                        val name = bare.substringAfterLast('/')
-                        val mp4 = Mp4(
-                            link,
-                            NAME_WIDTH.find(name)?.groupValues?.get(1)?.toIntOrNull() ?: 0,
-                            key?.let { KEY_TIER.find(it) }?.groupValues?.get(1)?.toIntOrNull()
-                                ?: NAME_TIER.find(name)?.groupValues?.get(1)?.toIntOrNull() ?: 0,
-                            (fields[WIDTH_KEY]?.get(node) as? Number)?.toInt() ?: 0,
-                        )
+                        val mp4 = Mp4(link, mp4Rank(key, link, (fields[WIDTH_KEY]?.get(node) as? Number)?.toInt() ?: 0))
                         mp4s += mp4
                     } else if (link != null && bare != null && bare.endsWith(M3U8)) {
                         hls += link
@@ -118,7 +109,7 @@ private object PinMedia {
             }
         }
         visit(pin, 0, null)
-        val best = mp4s.maxWithOrNull(rank)?.link
+        val best = mp4s.maxByOrNull { it.rank }?.link
         val derived = hls.filter { HLS_SEGMENT in it }.map { it.substringBefore('?').replace(HLS_SEGMENT, HLS_FALLBACK).removeSuffix(M3U8) + MP4 }
         return (listOfNotNull(best) + derived).distinct()
     }
@@ -133,6 +124,20 @@ private object PinMedia {
     }
 
     fun candidates(media: Any): List<String> = videoUrls(media).ifEmpty { imageUrls(media) }
+}
+
+internal data class Mp4Rank(val nameWidth: Int, val tier: Int, val fieldWidth: Int) : Comparable<Mp4Rank> {
+    override fun compareTo(other: Mp4Rank) = compareValuesBy(this, other, { it.nameWidth }, { it.tier }, { it.fieldWidth })
+}
+
+internal fun mp4Rank(key: String?, link: String, fieldWidth: Int): Mp4Rank {
+    val name = link.substringBefore('?').substringAfterLast('/')
+    return Mp4Rank(
+        NAME_WIDTH.find(name)?.groupValues?.get(1)?.toIntOrNull() ?: 0,
+        key?.let { KEY_TIER.find(it) }?.groupValues?.get(1)?.toIntOrNull()
+            ?: NAME_TIER.find(name)?.groupValues?.get(1)?.toIntOrNull() ?: 0,
+        fieldWidth,
+    )
 }
 
 private object PinterestSaver {
