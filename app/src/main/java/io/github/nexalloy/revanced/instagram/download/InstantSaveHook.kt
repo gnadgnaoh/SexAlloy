@@ -50,6 +50,8 @@ internal object InstantSaveHook {
 
     private val fieldCache = java.util.concurrent.ConcurrentHashMap<Class<*>, List<Field>>()
 
+    private val pressFields = java.util.concurrent.ConcurrentHashMap<Class<*>, String>()
+
     private fun function1Fields(cls: Class<*>, function1: Class<*>): List<Field> = fieldCache.getOrPut(cls) {
         cls.declaredFields.filter { !Modifier.isStatic(it.modifiers) && it.type == function1 }
             .onEach { it.isAccessible = true }
@@ -60,7 +62,10 @@ internal object InstantSaveHook {
             val original = field.get(owner) ?: return
             if (Proxy.isProxyClass(original.javaClass)) return
             val proxy = Proxy.newProxyInstance(cl, arrayOf(function1), InvocationHandler { _, method, args ->
-                if (method.name == "invoke" && args?.firstOrNull() == true) onLongPress()
+                if (method.name == "invoke" && args?.firstOrNull() == true) {
+                    val press = pressFields.putIfAbsent(owner.javaClass, field.name)
+                    if (press != null && press != field.name) onLongPress()
+                }
                 method.invoke(original, *(args ?: emptyArray()))
             })
             field.set(owner, proxy)
