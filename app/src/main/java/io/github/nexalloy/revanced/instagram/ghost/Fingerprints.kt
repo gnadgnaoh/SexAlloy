@@ -62,7 +62,7 @@ val directItemParserFingerprintList = findMethodListDirect {
     findMethod {
         matcher {
             name = "unsafeParseFromJson"
-            usingEqStrings("visual_media", "message_item_dict", "item_id")
+            usingEqStrings("visual_media", "message_item_dict")
         }
     }
 }
@@ -160,7 +160,7 @@ val typingStatusFingerprint = findMethodDirect {
 val ephemeralMediaJsonParserFingerprint = findMethodDirect {
     findMethod {
         matcher {
-            usingStrings("url_expire_at_secs", "view_mode", "seen_count", "tap_models")
+            usingStrings("url_expire_at_secs", "view_mode", "seen_count", "seen_user_ids")
             returnType = "void"
             paramCount = 2
         }
