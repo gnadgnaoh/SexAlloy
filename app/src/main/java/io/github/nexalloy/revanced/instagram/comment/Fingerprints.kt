@@ -4,6 +4,7 @@ import io.github.nexalloy.morphe.findFieldListDirect
 import io.github.nexalloy.morphe.findMethodDirect
 import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.result.ClassData
+import org.luckypray.dexkit.result.MethodData
 import java.lang.reflect.Modifier
 
 private const val GIPHY = "com.instagram.api.schemas.CommentGiphyMediaInfoIntf"
@@ -13,19 +14,23 @@ private fun ClassData.isRawComment() = isInterface() && methods.any { it.paramCo
 
 private fun ClassData.isInterface() = Modifier.isInterface(modifiers)
 
+private fun MethodData.selectedCommentParam() = paramTypes.singleOrNull { p -> p.fields.any { it.type.isRawComment() } }
+
 val commentMenuRendererFingerprint = findMethodDirect {
     findMethod {
         matcher {
             modifiers = Modifier.PUBLIC
             returnType = "void"
-            paramTypes(null, null, null, "java.util.List", "float")
+            paramCount = 5
             addInvoke { declaredClass(FRAGMENT); name = "requireContext" }
         }
-    }.single { m -> m.paramTypes[1].fields.any { it.type.isRawComment() } }
+    }.single { m ->
+        "java.util.List" in m.paramTypeNames && "float" in m.paramTypeNames && m.selectedCommentParam() != null
+    }
 }
 
 private fun DexKitBridge.rawCommentInterface(): ClassData =
-    commentMenuRendererFingerprint().paramTypes[1].fields.map { it.type }.first { it.isRawComment() }
+    commentMenuRendererFingerprint().selectedCommentParam()!!.fields.map { it.type }.first { it.isRawComment() }
 
 val commentMediaInfoGetterFingerprint = findMethodDirect {
     val raw = rawCommentInterface()
