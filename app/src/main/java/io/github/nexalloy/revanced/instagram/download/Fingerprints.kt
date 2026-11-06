@@ -57,9 +57,10 @@ val videoUrlConstructorFingerprint = findMethodDirect {
 val videoVersionsGetterMethods = findMethodListDirect {
     alwaysMatches() + findMethod {
         matcher {
+            declaredClass("com.instagram.feed.media.Media")
             paramCount = 0
             returnType = "java.util.List"
-            usingEqStrings("video_versions")
+            usingNumbers("video_versions".hashCode())
         }
     }
 }
