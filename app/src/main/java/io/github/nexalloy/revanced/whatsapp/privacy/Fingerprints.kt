@@ -1,6 +1,7 @@
 package io.github.nexalloy.revanced.whatsapp.privacy
 
 import io.github.nexalloy.morphe.findMethodDirect
+import io.github.nexalloy.revanced.whatsapp.core.jobRunOf
 import org.luckypray.dexkit.query.enums.StringMatchType
 import java.lang.reflect.Modifier
 
@@ -33,7 +34,4 @@ val composingSenderFingerprint = findMethodDirect {
     }.single { "int" in it.paramTypeNames }
 }
 
-val playedReceiptJobRunFingerprint = findMethodDirect {
-    findClass { matcher { className(".SendPlayedReceiptJob", StringMatchType.Contains) } }.single()
-        .findMethod { matcher { returnType = "void"; paramCount = 0; usingEqStrings("played") } }.single()
-}
+val playedReceiptJobRunFingerprint = findMethodDirect { jobRunOf(".SendPlayedReceiptJob") }
