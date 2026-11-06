@@ -137,19 +137,17 @@ val cdnOptionsConstructorFingerprint = findMethodDirect { cdnResize().options }
 val cdnScaleFieldFingerprint = findFieldDirect { cdnResize().scale }
 val cdnTierFieldFingerprint = findFieldDirect { cdnResize().tier }
 
-private const val SAVE_STORY_ATTEMPTED = "save_story_attempted"
-
 val storySaveActionClassFingerprint = findClassDirect {
     val menu = getClassData(STORY_VIEWER_MORE_MENU) ?: error("No $STORY_VIEWER_MORE_MENU in this build")
-    val candidates = menu.typesCreated().mapNotNull { getClassData(it) }
-    val tables = findMethod {
-        matcher { usingEqStrings(SAVE_STORY_ATTEMPTED); returnType = "java.lang.String"; paramTypes("int") }
-    }.filter { Modifier.isStatic(it.modifiers) }.map { it.descriptor }.toSet()
-    fun actionsWhere(test: (MethodData) -> Boolean) = candidates.filter { cls ->
-        cls.methods.any { m -> m.isMethod && m.returnTypeName == "void" && m.paramTypeNames.size == 1 && test(m) }
+    val taps = menu.typesCreated().mapNotNull { getClassData(it) }.mapNotNull { cls ->
+        cls.methods.singleOrNull { m -> m.isMethod && m.returnTypeName == "void" && m.paramTypeNames.size == 1 }?.let { cls to it }
     }
-    val actions = actionsWhere { SAVE_STORY_ATTEMPTED in it.usingStrings }
-        .ifEmpty { actionsWhere { m -> m.invokes.any { it.descriptor in tables } } }
+    val actionParam = taps.groupingBy { it.second.paramTypeNames.single() }.eachCount().maxByOrNull { it.value }?.key
+    val actions = taps.filter { (cls, tap) ->
+        val types = cls.fields.map { it.typeName }
+        tap.paramTypeNames.single() == actionParam && "android.content.Context" in types && STORY_CARD in types &&
+            tap.invokes.any { it.className == STORY_CARD && it.name == "getId" }
+    }.map { it.first }
     actions.singleOrNull() ?: error("Expected 1 save-story action, found ${actions.size}")
 }
 
