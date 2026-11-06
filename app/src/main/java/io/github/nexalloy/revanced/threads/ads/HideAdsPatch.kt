@@ -9,10 +9,13 @@ val HideAds = patch(
         "and the ads shown among the replies when you open a post.",
 ) {
     ::adFetchSponsoredContentFingerprint.hookMethod(XC_MethodReplacement.DO_NOTHING)
+    val params = ::permalinkAdResultFingerprint.constructor.parameterTypes
+    val adsArg = params.indexOfFirst { it == List::class.java }
+    val countArg = params.indexOfFirst { it == Int::class.javaPrimitiveType }
     ::permalinkAdResultFingerprint.hookMethod {
         before { param ->
-            param.args[0] = emptyList<Any>()
-            param.args[1] = 0
+            param.args[adsArg] = emptyList<Any>()
+            param.args[countArg] = 0
         }
     }
 }
