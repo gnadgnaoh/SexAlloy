@@ -42,7 +42,7 @@ val videoPlayerParamsVideoIdFieldFingerprint = findFieldDirect {
 
 val videoFeedStoryMenuFingerprint = findMethodDirect {
     findMethod {
-        matcher { returnType = "void"; usingEqStrings("VideoFeedStoryMenuHelper", "COPY_LINK") }
+        matcher { returnType = "void"; usingEqStrings("VideoFeedStoryMenuHelper") }
     }.single { m ->
         val p = m.paramTypeNames
         p.size >= 3 && p[0] == "android.view.Menu" && p[1] == "android.view.View" && p.last() == PLAYER_ORIGIN
