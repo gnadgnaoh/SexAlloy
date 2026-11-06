@@ -10,11 +10,33 @@ import org.luckypray.dexkit.result.MethodData
 
 internal const val CONVERSATION_ACTIVITY = "com.whatsapp.Conversation"
 
+private const val JOB = "org.whispersystems.jobqueue.Job"
+
 private fun DexKitBridge.jobRun(job: String, anchor: String): MethodData =
     findClass { matcher { className(job, StringMatchType.EndsWith) } }.single()
         .findMethod { matcher { returnType = "void"; paramCount = 0; usingEqStrings(anchor) } }.single()
 
-val readReceiptJobRunFingerprint = findMethodDirect { jobRun(".SendReadReceiptJob", "receipt") }
+private fun DexKitBridge.jobRunName(): String {
+    val abstracts = getClassData(JOB)!!.methods.filter { m ->
+        java.lang.reflect.Modifier.isAbstract(m.modifiers) && m.paramCount == 0 && m.returnTypeName == "void"
+    }.map { it.name }.toSet()
+    return findMethod {
+        matcher {
+            usingStrings(listOf("/onRun"), StringMatchType.Contains)
+            paramCount = 0
+            returnType = "void"
+            declaredClass { superClass = JOB }
+        }
+    }.filter { it.name in abstracts }.groupingBy { it.name }.eachCount().maxBy { it.value }.key
+}
+
+internal fun DexKitBridge.jobRunOf(job: String): MethodData {
+    val run = jobRunName()
+    return findClass { matcher { className(job, StringMatchType.Contains); superClass = JOB } }.single()
+        .methods.single { it.name == run && it.paramCount == 0 && it.returnTypeName == "void" }
+}
+
+val readReceiptJobRunFingerprint = findMethodDirect { jobRunOf(".SendReadReceiptJob") }
 
 val sendMessageJobRunFingerprint = findMethodDirect { jobRun(".SendE2EMessageJob", "SendE2EMessageJob/onRun ") }
 
