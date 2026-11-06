@@ -41,7 +41,7 @@ val shareLinkAppendersFingerprint = findMethodListDirect {
             matcher { returnType = STRING; paramTypes(STRING, STRING); usingEqStrings("sfnsn") }
         }.filter { Modifier.isStatic(it.modifiers) }.one(),
         findMethod {
-            matcher { returnType = STRING; paramTypes("com.facebook.graphql.model.GraphQLStory", STRING); usingEqStrings("ref", "share") }
+            matcher { returnType = STRING; paramTypes("com.facebook.graphql.model.GraphQLStory", STRING); usingEqStrings("ref") }
         }.one(),
         findMethod {
             matcher { returnType = STRING; paramTypes(FB_USER_SESSION, INTEGER, STRING); usingEqStrings("controlMsg", "controlTwi") }
