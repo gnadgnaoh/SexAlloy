@@ -30,7 +30,7 @@ val storySeenMutationSenderFingerprint = findMethodListDirect {
 
 val storySeenHelperFlushFingerprint = findMethodListDirect {
     findMethod {
-        matcher { usingEqStrings("on_detach", "top_connections_pog", "TOP_OF_FEED_TRAY") }
+        matcher { usingEqStrings("on_detach") }
     }.filter { m ->
         m.isHookable() && !Modifier.isStatic(m.modifiers) &&
             m.returnTypeName == "void" && m.paramTypeNames == listOf("java.lang.String")
