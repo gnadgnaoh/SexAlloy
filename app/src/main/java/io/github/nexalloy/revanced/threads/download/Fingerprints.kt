@@ -93,19 +93,15 @@ val mediaMenuIconFingerprint = findMethodDirect {
 }
 
 val postMenuCloseFingerprint = findMethodDirect {
-    findMethod { matcher { name = "invoke"; usingEqStrings("copy_link") } }.mapNotNull { method ->
-        val code = method.instructions
-        val at = code.indexOfFirst { it.string == "copy_link" }
-        val after = code.drop(at)
-        val controller = after.firstNotNullOfOrNull { it.call() }?.declaredClassName ?: return@mapNotNull null
-        val shared = after.indexOfFirst { insn -> insn.call()?.let { it.isConstructor && MEDIA in it.paramTypeNames } == true }
-        if (shared < 0) return@mapNotNull null
-        after.drop(shared).firstOrNull {
-            it.opcode == OP_INVOKE_VIRTUAL && it.call()?.let { m ->
-                m.declaredClassName == controller && m.paramCount == 0 && m.returnTypeName == "void"
-            } == true
-        }?.call()
-    }.distinctBy { it.descriptor }.single()
+    val controller = findClass {
+        matcher {
+            addField { type = "com.instagram.barcelona.archive.data.ArchiveRepository" }
+            addField { type = "com.instagram.barcelona.feed.post.actionmenu.data.BestOfThreadsVisibilityRepository" }
+        }
+    }.single()
+    controller.methods.filter { m ->
+        m.isMethod && !Modifier.isStatic(m.modifiers) && m.paramCount == 0 && m.returnTypeName == "void"
+    }.maxBy { m -> m.callers.map { it.declaredClassName }.distinct().size }
 }
 
 private fun DexKitBridge.pandoGetter(owner: String, field: String, returns: String) =
