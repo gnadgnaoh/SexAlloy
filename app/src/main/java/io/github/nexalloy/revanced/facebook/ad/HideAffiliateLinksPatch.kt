@@ -12,7 +12,12 @@ val HideAffiliateLinks = patch(
 ) {
     ::affiliateReelCardCheckFingerprint.method.hookMethod { after { param -> if (param.result == true) param.result = false } }
     ::affiliateFooterIdFingerprint.method.hookMethod { after { param -> param.result = null } }
-    ::affiliateCommentCardFingerprint.method.hookMethod { after { param -> param.result = false } }
+    val cardName = ::floatingCardNameFingerprint.method.apply { isAccessible = true }
+    ::affiliateCommentCardFingerprint.method.hookMethod {
+        after { param ->
+            if (param.result == true && cardName.invoke(null, param.args.last()) == FLOATING_CARD_PLUGIN) param.result = false
+        }
+    }
     ::affiliateCtaFilterFingerprint.method.hookMethod {
         after { param ->
             val shown = (param.result ?: param.args[0]) as? List<*> ?: return@after

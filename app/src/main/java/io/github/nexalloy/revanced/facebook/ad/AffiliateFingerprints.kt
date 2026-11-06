@@ -6,7 +6,7 @@ import org.luckypray.dexkit.query.enums.StringMatchType
 import java.lang.reflect.Modifier
 
 private const val AFFILIATE_EYEBROW = "AFFILIATE_EYEBROW"
-private const val FLOATING_CARD_PLUGIN =
+internal const val FLOATING_CARD_PLUGIN =
     "com.facebook.feedback.comments.plugins.indicatorpill.organicaffiliatefloatingcta.OrganicAffiliateFloatingCtaPlugin"
 private const val OP_SGET_OBJECT = 0x62
 private const val OP_SPUT_OBJECT = 0x69
@@ -45,10 +45,21 @@ val affiliateFooterIdFingerprint = findMethodDirect {
     lookups.singleOrNull() ?: error("Expected 1 footer id lookup, found ${lookups.size}")
 }
 
+val floatingCardNameFingerprint = findMethodDirect {
+    val tables = findMethod {
+        matcher { usingEqStrings(FLOATING_CARD_PLUGIN); returnType = "java.lang.String"; paramTypes("int") }
+    }.filter { Modifier.isStatic(it.modifiers) }
+    tables.singleOrNull() ?: error("Expected 1 floating card name table, found ${tables.size}")
+}
+
 val affiliateCommentCardFingerprint = findMethodDirect {
-    val gates = getClassData(FLOATING_CARD_PLUGIN)?.methods.orEmpty().filter { m ->
-        m.isMethod && Modifier.isStatic(m.modifiers) && m.paramTypeNames.isNotEmpty() && m.returnTypeName == "boolean"
-    }
+    val table = floatingCardNameFingerprint().descriptor
+    val gates = floatingCardNameFingerprint().callers.flatMap { caller ->
+        if (caller.invokes.none { it.descriptor == table }) emptyList()
+        else caller.invokes.filter { m ->
+            Modifier.isStatic(m.modifiers) && m.returnTypeName == "boolean" && m.paramTypeNames.lastOrNull() == "int"
+        }
+    }.distinctBy { it.descriptor }
     gates.singleOrNull() ?: error("Expected 1 floating card gate, found ${gates.size}")
 }
 
