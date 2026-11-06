@@ -18,5 +18,8 @@ val permalinkAdResultFingerprint = findMethodDirect {
             returnType = "java.lang.Object"
             usingStrings("text_feed/threads_permalink_ads/")
         }
-    }.single().invokes.single { it.isConstructor && it.paramTypeNames == listOf("java.util.List", "int") }
+    }.single().invokes.single { m ->
+        m.isConstructor && m.paramCount == 2 &&
+            m.paramTypeNames.count { it == "java.util.List" } == 1 && m.paramTypeNames.count { it == "int" } == 1
+    }
 }
