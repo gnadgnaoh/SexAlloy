@@ -29,7 +29,12 @@ val SaveCommentPhoto = patch(
     val rawType = infoGetter.declaringClass
     val gifGetter = rawType.methods.single { it.parameterCount == 0 && it.returnType.name == GIPHY }
     val mediaGetter = infoGetter.returnType.methods.single { it.parameterCount == 0 && it.returnType == MediaResolver.mediaType }
-    val selectedType = renderer.parameterTypes[1]
+    val params = renderer.parameterTypes
+    val fragmentType = classLoader.loadClass("androidx.fragment.app.Fragment")
+    val selectedArg = params.indices.single { i -> params[i].declaredFields.any { it.type == rawType } }
+    val rowsArg = params.indices.single { params[it] == List::class.java }
+    val fragmentArg = params.indices.single { fragmentType.isAssignableFrom(params[it]) }
+    val selectedType = params[selectedArg]
     val rawField = selectedType.declaredFields.single { it.type == rawType }.apply { isAccessible = true }
 
     val save = ::menuActionSingletonsFingerprint.fieldList.firstNotNullOfOrNull { f ->
@@ -61,9 +66,9 @@ val SaveCommentPhoto = patch(
     renderer.hookMethod {
         before { param ->
             runCatching {
-                val rows = param.args[3] as? List<*> ?: return@runCatching
-                val selected = param.args[1] ?: return@runCatching
-                val ctx = param.args[0]?.let { f -> f.javaClass.getMethod("requireContext").invoke(f) as? Context } ?: return@runCatching
+                val rows = param.args[rowsArg] as? List<*> ?: return@runCatching
+                val selected = param.args[selectedArg] ?: return@runCatching
+                val ctx = param.args[fragmentArg]?.let { f -> f.javaClass.getMethod("requireContext").invoke(f) as? Context } ?: return@runCatching
                 val found = target(ctx, selected) ?: return@runCatching
                 val maker = RowMaker.of(rows, function0) ?: return@runCatching
                 val author = userType?.let { MediaResolver.usernameOfUser(MediaResolver.fieldOfType(selected, it)) }
@@ -77,7 +82,7 @@ val SaveCommentPhoto = patch(
                     }
                 }
                 val row = maker.make(rows, icon, label, callback) ?: return@runCatching
-                param.args[3] = ArrayList<Any?>(rows.size + 1).apply { addAll(rows); add(row) }
+                param.args[rowsArg] = ArrayList<Any?>(rows.size + 1).apply { addAll(rows); add(row) }
             }
         }
     }
