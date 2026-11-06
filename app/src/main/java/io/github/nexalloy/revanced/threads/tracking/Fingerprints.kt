@@ -12,7 +12,7 @@ val permalinkResponseParserFingerprint = findMethodDirect {
         matcher {
             name = "unsafeParseFromJson"
             returnType = "java.lang.Object"
-            usingEqStrings("permalink", "XDTPermalinkResponse")
+            usingEqStrings("XDTPermalinkResponse")
         }
     }.single()
 }
