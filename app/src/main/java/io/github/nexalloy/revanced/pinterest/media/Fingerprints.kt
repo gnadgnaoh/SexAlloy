@@ -73,3 +73,42 @@ val trackUrlFingerprint = findFieldDirect {
 val trackListFingerprint = findFieldDirect {
     toStringClass("TrackSelectorInput(mediaUid=").fields.single { it.typeName == "java.util.LinkedHashMap" }
 }
+
+private fun DexKitBridge.glideFetcher() = findMethod {
+    matcher { usingStrings(listOf("OkHttp failed to obtain result"), StringMatchType.Contains) }
+}.single().declaredClass!!
+
+private fun DexKitBridge.glideUrlClass() = glideFetcher().methods.single { it.isConstructor }.paramTypeNames
+    .mapNotNull { getClassData(it) }
+    .single { c -> c.methods.any { it.isConstructor && it.paramTypeNames == listOf("java.lang.String") } }
+
+val glideFetcherLoadFingerprint = findMethodDirect {
+    glideFetcher().methods.single { m ->
+        m.isMethod && m.returnTypeName == "void" && m.paramCount == 2 && m.paramTypeNames[1].startsWith("com.bumptech.glide.load.data.")
+    }
+}
+
+val glideFetcherResponseFingerprint = findMethodDirect { glideFetcher().methods.single { it.name == "onResponse" && it.paramCount == 2 } }
+
+val glideFetcherFailureFingerprint = findMethodDirect { glideFetcher().methods.single { it.name == "onFailure" && it.paramCount == 2 } }
+
+val glideFetcherUrlFieldFingerprint = findFieldDirect {
+    val url = glideUrlClass().name
+    glideFetcher().fields.single { it.typeName == url }
+}
+
+val glideUrlWithHeadersFingerprint = findMethodDirect {
+    glideUrlClass().methods.single { it.isConstructor && it.paramCount == 2 && it.paramTypeNames[0] == "java.lang.String" }
+}
+
+val glideUrlHeadersFieldFingerprint = findFieldDirect {
+    val headers = glideUrlWithHeadersFingerprint().paramTypeNames[1]
+    glideUrlClass().fields.single { it.typeName == headers }
+}
+
+val imageResponseCodeFingerprint = findFieldDirect {
+    val response = getClassData(glideFetcherResponseFingerprint().paramTypeNames[1])!!
+    response.findMethod { matcher { name = "toString" } }.single().instructions.let { code ->
+        code.drop(code.indexOfFirst { it.string == ", code=" }).first { it.fieldRef != null }.fieldRef!!
+    }
+}
