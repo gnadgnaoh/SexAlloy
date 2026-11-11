@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="wa_send_read">Gửi đã xem</string>
+    <string name="wa_read_sent">Đã gửi đã xem</string>
+    <string name="wa_read_nothing">Chat này không có tin nào chờ gửi đã xem</string>
+    <string name="wa_revoked_label">đã thu hồi</string>
+    <string name="wa_copied">Đã sao chép</string>
+    <string name="wa_edit_history">Lịch sử sửa</string>
+    <string name="wa_edit_original">Bản gốc</string>
+    <string name="wa_download">Tải</string>
+    <string name="wa_share">Chia sẻ</string>
+    <string name="wa_repost">Đăng lại lên status</string>
+    <string name="wa_media_saved">Đã lưu vào Download/WhatsApp</string>
+    <string name="wa_media_failed">Không lưu được: %1$s</string>
+    <string name="wa_media_unavailable">Media này chưa được tải về</string>
+    <string name="wa_copy_text">Sao chép chữ</string>
+    <string name="wa_no_text">Status này không có chữ</string>
+</resources>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="wa_send_read">Send read receipts</string>
+    <string name="wa_read_sent">Read receipts sent</string>
+    <string name="wa_read_nothing">No unsent read receipts in this chat</string>
+    <string name="wa_revoked_label">deleted</string>
+    <string name="wa_copied">Copied</string>
+    <string name="wa_edit_history">Edit history</string>
+    <string name="wa_edit_original">Original</string>
+    <string name="wa_download">Download</string>
+    <string name="wa_share">Share</string>
+    <string name="wa_repost">Repost to my status</string>
+    <string name="wa_media_saved">Saved to Download/WhatsApp</string>
+    <string name="wa_media_failed">Couldn\'t save: %1$s</string>
+    <string name="wa_media_unavailable">This media isn\'t downloaded yet</string>
+    <string name="wa_copy_text">Copy text</string>
+    <string name="wa_no_text">This status has no text</string>
+</resources>
