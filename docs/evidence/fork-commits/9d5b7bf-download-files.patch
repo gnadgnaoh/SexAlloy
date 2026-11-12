@@ -1,0 +1,1394 @@
+commit 9d5b7bf13940e8eed299a6e00627e8965f34df79
+Author: soctrungkien <soctrungkien@github.com>
+Date:   2026-10-28 13:41:08 +0700
+
+    .
+---
+ README.md                                                                   |   4 +-
+ .../electroheavenvn/zaloxposed/hooks/functional/DownloadMediaHook.java      | 571 ++++++++++++++++++++++++++++++++++++
+ .../main/java/io/github/electroheavenvn/zaloxposed/utilities/FeedMedia.java | 149 ++++++++++
+ .../java/io/github/electroheavenvn/zaloxposed/utilities/MediaSaver.java     | 448 ++++++++++++++++++++++++++++
+ .../main/java/io/github/electroheavenvn/zaloxposed/utilities/ZaloModel.java | 174 +++++++++++
+ 5 files changed, 1345 insertions(+), 1 deletion(-)
+
+diff --git a/README.md b/README.md
+index f02a4b5..a5aa5a0 100644
+--- a/README.md
++++ b/README.md
+@@ -26,7 +26,9 @@ Some features include:
+ - **Hide ads:** Removes various advertisements and promotional content from the app.
+ - **Hide typing indicators and "Seen" status:** Blocks sending typing and read receipts.
+ - **Restore hidden features:** Brings back removed features like profile music, Google Drive backup, etc.
+-- **UI/UX enhancements:** Custom backgrounds, extended menus, Mini Chat, and more.
++- **Media download:** Adds Download actions to stories, photos, videos and timeline posts, saving to `Pictures/Zalo` and `Movies/Zalo` (JPEG XL images are converted when possible).
++- **Screen effects:** Blocks full-screen message effects and sticker/punch-glass effects.
++- **UI/UX enhancements:** Custom backgrounds, extended menus, Mini Chat, liquid tab bar, and more.
+ - **Unlock premium features:** Unlocks certain premium features without payment. 
+ 
+ ## How to use
+diff --git a/app/src/main/java/io/github/electroheavenvn/zaloxposed/hooks/functional/DownloadMediaHook.java b/app/src/main/java/io/github/electroheavenvn/zaloxposed/hooks/functional/DownloadMediaHook.java
+new file mode 100644
+index 0000000..3a46812
+--- /dev/null
++++ b/app/src/main/java/io/github/electroheavenvn/zaloxposed/hooks/functional/DownloadMediaHook.java
+@@ -0,0 +1,571 @@
++package io.github.electroheavenvn.zaloxposed.hooks.functional;
++
++import android.content.Context;
++import android.content.res.Resources;
++import android.os.Bundle;
++
++import io.github.electroheavenvn.zaloxposed.hooks.BaseHook;
++import io.github.electroheavenvn.zaloxposed.utilities.Config;
++import io.github.electroheavenvn.zaloxposed.utilities.CustomFont;
++import io.github.electroheavenvn.zaloxposed.utilities.FeedMedia;
++import io.github.electroheavenvn.zaloxposed.utilities.Logger;
++import io.github.electroheavenvn.zaloxposed.utilities.MediaSaver;
++import io.github.electroheavenvn.zaloxposed.utilities.Utils;
++import io.github.electroheavenvn.zaloxposed.utilities.ZaloModel;
++
++import org.json.JSONObject;
++import org.luckypray.dexkit.query.FindMethod;
++import org.luckypray.dexkit.query.enums.StringMatchType;
++import org.luckypray.dexkit.query.matchers.MethodMatcher;
++import org.luckypray.dexkit.result.MethodData;
++
++import java.lang.reflect.Field;
++import java.lang.reflect.Method;
++import java.lang.reflect.Modifier;
++import java.util.ArrayList;
++import java.util.Collections;
++import java.util.LinkedHashSet;
++import java.util.List;
++import java.util.Map;
++import java.util.Set;
++import java.util.WeakHashMap;
++
++/**
++ * Adds Download actions to Zalo's story, photo and video menus and handles the
++ * selected media. The implementation is based on the readonly NexAlloy patch
++ * and uses the same model-independent reflection strategy.
++ */
++public class DownloadMediaHook extends BaseHook
++{
++    private static final String MENU_VIEW = "com.zing.zalo.social.features.menu_feed.BottomSheetMenuView";
++    private static final String BUNDLE_DATA = "com.zing.zalo.social.features.menu_feed.model.BottomSheetMenuBundleData";
++
++    private static final int MENU_ITEM_ID = 20056;
++    private static final int ALL_ITEM_ID = 20057;
++    private static final int DEFAULTS_MASK = 0x1f0;
++    private static final int PHOTO_DOWNLOAD_ID = 0x17;
++    private static final int VIDEO_DOWNLOAD_ID = 0x1c;
++    private static final int PHOTO_SHEET = 6;
++    private static final int VIDEO_SHEET = 7;
++
++    private static final String DOWNLOAD_ICON = "ic_bottom_sheet_story_download";
++    private static final String DOWNLOAD_TITLE = "str_bottom_sheet_story_download_tittle";
++    private static final String MEDIA_ICON = "ic_bottom_sheet_menu_download";
++    private static final String PHOTO_TITLE = "str_bottom_sheet_menu_photo_download";
++    private static final String VIDEO_TITLE = "str_bottom_sheet_menu_video_download";
++
++    private final Map<Object, Object> stories = Collections.synchronizedMap(new WeakHashMap<>());
++    private final Map<Object, FeedMedia> feeds = Collections.synchronizedMap(new WeakHashMap<>());
++
++    private Method storyJsonMethod;
++    private Method storyMenuBuilder;
++    private Method factoryMethod;
++    private Object factoryCompanion;
++    private Method clickMethod;
++
++    private Method viewfullMethod;
++    private Method presenterGetter;
++    private Field presenterBundleField;
++    private Field presenterItemsField;
++    private Field sheetTypeField;
++    private Method feedJsonMethod;
++    private Class<?> feedClass;
++    private Class<?> storyClass;
++
++    @Override
++    public void hook() throws Throwable
++    {
++        resolveStory();
++        resolveViewfull();
++        hookStoryMenu();
++        hookMenuClick();
++        hookViewfullMenu();
++    }
++
++    private void resolveStory()
++    {
++        List<MethodData> storyJson = bridge.findMethod(FindMethod.create()
++            .matcher(MethodMatcher.create()
++                .returnType("org.json.JSONObject")
++                .paramCount(0)
++                .addUsingString("urlHls", StringMatchType.Equals)
++                .addUsingString("serverFileId", StringMatchType.Equals)
++                .addUsingString("delayTime", StringMatchType.Equals)
++            ));
++        MethodData storyJsonData = firstNonStatic(storyJson);
++        if (storyJsonData == null)
++            Logger.e("Story JSON method not found");
++        else
++        {
++            try
++            {
++                storyJsonMethod = storyJsonData.getMethodInstance(classLoader);
++                storyJsonMethod.setAccessible(true);
++                storyClass = storyJsonMethod.getDeclaringClass();
++            }
++            catch (Throwable t)
++            {
++                Logger.e("Cannot resolve story JSON method: " + t.getMessage());
++            }
++        }
++
++        List<MethodData> builders = bridge.findMethod(FindMethod.create()
++            .matcher(MethodMatcher.create()
++                .returnType("java.util.List")
++                .addUsingString("dataStoryViewFull", StringMatchType.Equals)
++            ));
++        if (builders.isEmpty())
++        {
++            Logger.e("Story menu builder not found");
++            return;
++        }
++        try
++        {
++            MethodData builderData = builders.get(0);
++            storyMenuBuilder = builderData.getMethodInstance(classLoader);
++
++            Set<String> descriptors = new LinkedHashSet<>();
++            MethodData factoryData = null;
++            for (MethodData invoked : builderData.getInvokes())
++            {
++                if (!Modifier.isStatic(invoked.getModifiers())
++                    || invoked.getParamCount() != 10
++                    || "void".equals(invoked.getReturnTypeName())
++                    || !invoked.getParamTypeNames().contains("android.graphics.drawable.Drawable"))
++                    continue;
++                if (!descriptors.add(invoked.getDescriptor()))
++                    continue;
++                factoryData = invoked;
++            }
++            if (factoryData == null)
++            {
++                Logger.e("Story menu item factory not found");
++                return;
++            }
++            factoryMethod = factoryData.getMethodInstance(classLoader);
++            factoryMethod.setAccessible(true);
++
++            Class<?> companionType = factoryMethod.getParameterTypes()[0];
++            Object companion = null;
++            for (Field field : factoryMethod.getReturnType().getDeclaredFields())
++            {
++                if (!Modifier.isStatic(field.getModifiers()) || field.getType() != companionType)
++                    continue;
++                field.setAccessible(true);
++                companion = field.get(null);
++                break;
++            }
++            if (companion == null)
++            {
++                Logger.e("Story menu item companion not found");
++                return;
++            }
++            factoryCompanion = companion;
++
++            List<MethodData> clicks = bridge.findMethod(FindMethod.create()
++                .matcher(MethodMatcher.create()
++                    .declaredClass(MENU_VIEW)
++                    .paramCount(1)
++                    .paramTypes(factoryMethod.getReturnType().getName())
++                    .returnType("void")
++                ));
++            if (clicks.isEmpty())
++            {
++                Logger.e("Menu item click method not found");
++                return;
++            }
++            clickMethod = clicks.get(0).getMethodInstance(classLoader);
++            Logger.i("Hooking download menu: " + storyMenuBuilder + ", " + clickMethod);
++        }
++        catch (Throwable t)
++        {
++            Logger.e("Cannot resolve story download menu: " + t.getMessage());
++        }
++    }
++
++    private void resolveViewfull()
++    {
++        List<MethodData> methods = bridge.findMethod(FindMethod.create()
++            .matcher(MethodMatcher.create()
++                .declaredClass(MENU_VIEW)
++                .paramTypes("android.os.Bundle")
++                .returnType("void")
++                .addUsingString("EXTRA_BUNDLE_DATA", StringMatchType.Equals)
++                .addUsingString("hiddenAreaHeight", StringMatchType.Equals)
++                .addUsingNumber(PHOTO_DOWNLOAD_ID)
++                .addUsingNumber(VIDEO_DOWNLOAD_ID)
++            ));
++        if (methods.isEmpty())
++        {
++            Logger.e("Photo/video menu method not found");
++            return;
++        }
++        try
++        {
++            viewfullMethod = methods.get(0).getMethodInstance(classLoader);
++            Class<?> bundleType = Class.forName(BUNDLE_DATA, false, classLoader);
++            for (Field field : bundleType.getDeclaredFields())
++            {
++                if (Modifier.isStatic(field.getModifiers()) || field.getType() != int.class)
++                    continue;
++                field.setAccessible(true);
++                sheetTypeField = field;
++                break;
++            }
++
++            for (Method method : viewfullMethod.getDeclaringClass().getDeclaredMethods())
++            {
++                if (method.getParameterCount() != 0)
++                    continue;
++                boolean hasBundle = false;
++                for (Field field : method.getReturnType().getDeclaredFields())
++                {
++                    if (field.getType() == bundleType)
++                    {
++                        hasBundle = true;
++                        break;
++                    }
++                }
++                if (!hasBundle)
++                    continue;
++                method.setAccessible(true);
++                presenterGetter = method;
++                break;
++            }
++            if (presenterGetter == null)
++            {
++                Logger.e("Photo/video menu presenter getter not found");
++                return;
++            }
++
++            Class<?> presenterType = presenterGetter.getReturnType();
++            for (Field field : presenterType.getDeclaredFields())
++            {
++                if (field.getType() == bundleType && presenterBundleField == null)
++                {
++                    field.setAccessible(true);
++                    presenterBundleField = field;
++                }
++                else if (field.getType() == List.class && presenterItemsField == null)
++                {
++                    field.setAccessible(true);
++                    presenterItemsField = field;
++                }
++            }
++            if (presenterBundleField == null || presenterItemsField == null || sheetTypeField == null)
++            {
++                Logger.e("Photo/video menu presenter fields not found");
++                return;
++            }
++
++            List<MethodData> feedJson = bridge.findMethod(FindMethod.create()
++                .matcher(MethodMatcher.create()
++                    .returnType("org.json.JSONObject")
++                    .paramCount(0)
++                    .addUsingString("fid", StringMatchType.Equals)
++                    .addUsingString("ftype", StringMatchType.Equals)
++                    .addUsingString("feed_title", StringMatchType.Equals)
++                    .addUsingString("content", StringMatchType.Equals)
++                ));
++            MethodData feedData = firstNonStatic(feedJson);
++            if (feedData == null)
++            {
++                Logger.e("Feed JSON method not found");
++                return;
++            }
++            feedJsonMethod = feedData.getMethodInstance(classLoader);
++            feedJsonMethod.setAccessible(true);
++            feedClass = feedJsonMethod.getDeclaringClass();
++            Logger.i("Hooking photo/video download menu: " + viewfullMethod);
++        }
++        catch (Throwable t)
++        {
++            Logger.e("Cannot resolve photo/video download menu: " + t.getMessage());
++        }
++    }
++
++    private void hookStoryMenu()
++    {
++        if (storyMenuBuilder == null || factoryMethod == null || factoryCompanion == null
++            || storyClass == null)
++            return;
++        module.hook(storyMenuBuilder).intercept(chain ->
++        {
++            Object result = chain.proceed();
++            if (!Config.getEnableDownload() || !(result instanceof List))
++                return result;
++            try
++            {
++                List<Object> list = (List<Object>)result;
++                Object data = chain.getArg(0);
++                Context context = (Context)ZaloModel.valueOfType(data, Context.class);
++                Object story = ZaloModel.reachable(data, storyClass);
++                if (context == null || story == null)
++                    return result;
++                Resources resources = context.getResources();
++                int icon = resources.getIdentifier(DOWNLOAD_ICON, "drawable", context.getPackageName());
++                int title = resources.getIdentifier(DOWNLOAD_TITLE, "string", context.getPackageName());
++                if (icon == 0 || title == 0)
++                    return result;
++                for (Object item : list)
++                {
++                    if (item != null && ZaloModel.holdsInt(item, icon))
++                        return result;
++                }
++                Object item = factoryMethod.invoke(null, factoryCompanion, MENU_ITEM_ID, icon,
++                    resources.getString(title), null, false, null, null, null, DEFAULTS_MASK);
++                if (item != null)
++                {
++                    stories.put(item, story);
++                    list.add(item);
++                }
++            }
++            catch (Throwable t)
++            {
++                Logger.e("Cannot add story download item: " + t.getMessage());
++            }
++            return result;
++        });
++    }
++
++    private void hookMenuClick()
++    {
++        if (clickMethod == null)
++            return;
++        module.hook(clickMethod).intercept(chain ->
++        {
++            if (!Config.getEnableDownload())
++                return chain.proceed();
++            Object item = chain.getArg(0);
++            Object story = stories.get(item);
++            if (story != null)
++            {
++                Context context = appContext();
++                if (context != null)
++                    saveStory(context, story);
++                return chain.proceed();
++            }
++            FeedMedia media = feeds.get(item);
++            if (media != null)
++            {
++                Context context = appContext();
++                if (context != null)
++                {
++                    if (media.getUrls().size() == 1 && media.getMissing() == 0)
++                        MediaSaver.save(context, media.getUrls().get(0), "zalo_" + media.getId());
++                    else
++                        MediaSaver.saveAll(context, media.getUrls(), "zalo_" + media.getId(),
++                            media.getMissing(), media.getStreams());
++                }
++                if (closeSheet(chain.getThisObject()))
++                    return null;
++            }
++            return chain.proceed();
++        });
++    }
++
++    private void hookViewfullMenu()
++    {
++        if (viewfullMethod == null || factoryMethod == null || factoryCompanion == null
++            || presenterGetter == null || presenterBundleField == null
++            || presenterItemsField == null || sheetTypeField == null)
++            return;
++        module.hook(viewfullMethod).intercept(chain ->
++        {
++            Object result = chain.proceed();
++            if (!Config.getEnableDownload())
++                return result;
++            try
++            {
++                Object presenter = presenterGetter.invoke(chain.getThisObject());
++                if (presenter == null)
++                    return result;
++                Object bundleObject = presenterBundleField.get(presenter);
++                Object itemsObject = presenterItemsField.get(presenter);
++                if (!(bundleObject instanceof Bundle) || !(itemsObject instanceof List))
++                    return result;
++                Bundle bundle = (Bundle)bundleObject;
++                List<Object> sourceItems = (List<Object>)itemsObject;
++                List<Object> items = sourceItems;
++                Context context = appContext();
++                if (context == null)
++                    return result;
++                Resources resources = context.getResources();
++                int icon = resources.getIdentifier(MEDIA_ICON, "drawable", context.getPackageName());
++                if (icon == 0)
++                    return result;
++
++                int sheet = sheetTypeField.getInt(bundle);
++                int nativeId = 0;
++                String nativeTitle = null;
++                if (sheet == PHOTO_SHEET)
++                {
++                    nativeId = PHOTO_DOWNLOAD_ID;
++                    nativeTitle = PHOTO_TITLE;
++                }
++                else if (sheet == VIDEO_SHEET)
++                {
++                    nativeId = VIDEO_DOWNLOAD_ID;
++                    nativeTitle = VIDEO_TITLE;
++                }
++
++                boolean changed = false;
++                if (nativeId != 0)
++                {
++                    boolean exists = false;
++                    for (Object item : items)
++                    {
++                        if (item != null && ZaloModel.holdsInt(item, icon))
++                        {
++                            exists = true;
++                            break;
++                        }
++                    }
++                    if (!exists)
++                    {
++                        int titleId = resources.getIdentifier(nativeTitle, "string", context.getPackageName());
++                        if (titleId != 0)
++                        {
++                            Object item = factoryMethod.invoke(null, factoryCompanion, nativeId, icon,
++                                resources.getString(titleId), null, false, null, null, null, DEFAULTS_MASK);
++                            if (item != null)
++                            {
++                                items.add(0, item);
++                                changed = true;
++                            }
++                        }
++                    }
++                }
++                else
++                {
++                    Object feed = ZaloModel.find(bundle, feedClass, 3);
++                    FeedMedia media = feed != null ? FeedMedia.of(feedJsonMethod, feed) : null;
++                    if (media != null && !media.getUrls().isEmpty())
++                    {
++                        boolean single = media.getUrls().size() == 1 && media.getMissing() == 0;
++                        String title;
++                        if (!single)
++                        {
++                            int count = media.getUrls().size() + media.getMissing();
++                            title = (Utils.IsEnglish() ? "Download all (" : "Tải tất cả (") + count + ")";
++                        }
++                        else
++                        {
++                            int titleId = resources.getIdentifier(
++                                media.getVideos() > 0 ? VIDEO_TITLE : PHOTO_TITLE,
++                                "string", context.getPackageName());
++                            title = titleId != 0 ? resources.getString(titleId) : "";
++                        }
++                        if (!title.isEmpty())
++                        {
++                            Object item = factoryMethod.invoke(null, factoryCompanion, ALL_ITEM_ID, icon,
++                                title, null, false, null, null, null, DEFAULTS_MASK);
++                            if (item != null)
++                            {
++                                feeds.put(item, media);
++                                items.add(0, item);
++                                changed = true;
++                            }
++                        }
++                    }
++                }
++                if (changed)
++                    presenterItemsField.set(presenter, items);
++            }
++            catch (Throwable t)
++            {
++                Logger.e("Cannot add photo/video download item: " + t.getMessage());
++            }
++            return result;
++        });
++    }
++
++    private void saveStory(Context context, Object story)
++    {
++        try
++        {
++            Object value = storyJsonMethod.invoke(story);
++            if (!(value instanceof JSONObject))
++            {
++                MediaSaver.toast(context, Utils.IsEnglish()
++                    ? "No downloadable media found."
++                    : "Không tìm thấy media có thể tải.");
++                return;
++            }
++            JSONObject json = (JSONObject)value;
++            String url = json.optString("url");
++            if (url == null || !url.startsWith("http") || url.contains(".m3u8"))
++            {
++                boolean stream = !json.optString("urlHls").isEmpty();
++                MediaSaver.toast(context, stream
++                    ? (Utils.IsEnglish() ? "This story only provides an HLS stream." : "Story này chỉ có luồng HLS.")
++                    : (Utils.IsEnglish() ? "No downloadable media found." : "Không tìm thấy media có thể tải."));
++                return;
++            }
++            String owner = FeedMedia.sanitize(json.optString("ownerId"));
++            if (owner.isEmpty())
++                owner = "user";
++            String id = FeedMedia.sanitize(json.optString("id"));
++            if (id.isEmpty())
++                id = String.valueOf(System.currentTimeMillis());
++            MediaSaver.save(context, url, "zalo_story_" + owner + "_" + id);
++        }
++        catch (Throwable t)
++        {
++            Logger.e("Cannot save story: " + t.getMessage());
++        }
++    }
++
++    private boolean closeSheet(Object sheet)
++    {
++        if (sheet == null)
++            return false;
++        Class<?> current = sheet.getClass();
++        while (current != null && current != Object.class)
++        {
++            for (Method method : current.getDeclaredMethods())
++            {
++                if (!"close".equals(method.getName()) || method.getParameterCount() != 0)
++                    continue;
++                try
++                {
++                    method.setAccessible(true);
++                    method.invoke(sheet);
++                    return true;
++                }
++                catch (Throwable ignored)
++                {
++                    return false;
++                }
++            }
++            current = current.getSuperclass();
++        }
++        return false;
++    }
++
++    private Context appContext()
++    {
++        Context context = CustomFont.getAppContext();
++        if (context != null)
++            return context;
++        try
++        {
++            Class<?> activityThread = Class.forName("android.app.ActivityThread");
++            Object application = activityThread.getMethod("currentApplication").invoke(null);
++            if (application instanceof Context)
++                return (Context)application;
++        }
++        catch (Throwable ignored) { }
++        return null;
++    }
++
++    private static MethodData firstNonStatic(List<MethodData> methods)
++    {
++        for (MethodData method : methods)
++        {
++            if (!Modifier.isStatic(method.getModifiers()))
++                return method;
++        }
++        return null;
++    }
++}
+diff --git a/app/src/main/java/io/github/electroheavenvn/zaloxposed/utilities/FeedMedia.java b/app/src/main/java/io/github/electroheavenvn/zaloxposed/utilities/FeedMedia.java
+new file mode 100644
+index 0000000..a2ee28c
+--- /dev/null
++++ b/app/src/main/java/io/github/electroheavenvn/zaloxposed/utilities/FeedMedia.java
+@@ -0,0 +1,149 @@
++package io.github.electroheavenvn.zaloxposed.utilities;
++
++import org.json.JSONArray;
++import org.json.JSONObject;
++
++import java.lang.reflect.Method;
++import java.util.ArrayList;
++import java.util.Iterator;
++import java.util.LinkedHashSet;
++import java.util.List;
++import java.util.Locale;
++
++/**
++ * Extracts downloadable media URLs from a Zalo feed/post JSON object.
++ */
++public final class FeedMedia
++{
++    private static final String ORIGIN = "origin";
++    private static final String THUMB = "thumb";
++    private static final String HLS = "hls";
++    private static final String MORE = "more_photo";
++    private static final String VIDEO = "video";
++
++    private final String id;
++    private final List<String> urls;
++    private final int missing;
++    private final int streams;
++    private final int videos;
++
++    private FeedMedia(String id, List<String> urls, int missing, int streams, int videos)
++    {
++        this.id = id;
++        this.urls = urls;
++        this.missing = missing;
++        this.streams = streams;
++        this.videos = videos;
++    }
++
++    public String getId()
++    {
++        return id;
++    }
++
++    public List<String> getUrls()
++    {
++        return urls;
++    }
++
++    public int getMissing()
++    {
++        return missing;
++    }
++
++    public int getStreams()
++    {
++        return streams;
++    }
++
++    public int getVideos()
++    {
++        return videos;
++    }
++
++    public static FeedMedia of(Method feedJsonMethod, Object feed)
++    {
++        try
++        {
++            Object value = feedJsonMethod.invoke(feed);
++            if (!(value instanceof JSONObject))
++                return null;
++            JSONObject json = (JSONObject)value;
++            JSONObject content = json.optJSONObject("content");
++            if (content == null)
++                return null;
++
++            LinkedHashSet<String> urls = new LinkedHashSet<>();
++            int[] counters = new int[]{0, 0}; // streams, videos
++            walk(content, null, urls, counters);
++
++            String fid = sanitize(json.optString("fid"));
++            if (fid.isEmpty())
++                fid = String.valueOf(System.currentTimeMillis());
++            int missing = Math.max(0, content.optInt(MORE, 0));
++            return new FeedMedia("feed_" + fid, new ArrayList<>(urls), missing, counters[0], counters[1]);
++        }
++        catch (Throwable t)
++        {
++            Logger.e("Cannot read feed media: " + t.getMessage());
++            return null;
++        }
++    }
++
++    private static void walk(Object node, String key, LinkedHashSet<String> urls, int[] counters)
++    {
++        if (node instanceof JSONObject)
++        {
++            JSONObject object = (JSONObject)node;
++            String origin = link(object.optString(ORIGIN));
++            boolean hls = !object.optString(HLS).isEmpty();
++            if (origin != null)
++            {
++                if (urls.add(origin) && VIDEO.equals(key))
++                    counters[1]++;
++            }
++            else if (hls)
++                counters[0]++;
++            else if (object.has(ORIGIN))
++            {
++                String thumb = link(object.optString(THUMB));
++                if (thumb != null)
++                    urls.add(thumb);
++            }
++
++            Iterator<String> keys = object.keys();
++            while (keys.hasNext())
++            {
++                String childKey = keys.next();
++                walk(object.opt(childKey), childKey, urls, counters);
++            }
++        }
++        else if (node instanceof JSONArray)
++        {
++            JSONArray array = (JSONArray)node;
++            for (int i = 0; i < array.length(); i++)
++                walk(array.opt(i), key, urls, counters);
++        }
++    }
++
++    private static String link(String value)
++    {
++        if (value == null || !value.startsWith("http") || value.contains(".m3u8"))
++            return null;
++        return value;
++    }
++
++    public static String sanitize(String value)
++    {
++        if (value == null)
++            return "";
++        StringBuilder builder = new StringBuilder(value.length());
++        for (int i = 0; i < value.length(); i++)
++        {
++            char c = value.charAt(i);
++            if (Character.isLetterOrDigit(c))
++                builder.append(c);
++        }
++        return builder.toString().toLowerCase(Locale.ROOT);
++    }
++}
+diff --git a/app/src/main/java/io/github/electroheavenvn/zaloxposed/utilities/MediaSaver.java b/app/src/main/java/io/github/electroheavenvn/zaloxposed/utilities/MediaSaver.java
+new file mode 100644
+index 0000000..1a2d162
+--- /dev/null
++++ b/app/src/main/java/io/github/electroheavenvn/zaloxposed/utilities/MediaSaver.java
+@@ -0,0 +1,448 @@
++package io.github.electroheavenvn.zaloxposed.utilities;
++
++import android.content.ContentResolver;
++import android.content.ContentValues;
++import android.content.Context;
++import android.graphics.Bitmap;
++import android.media.MediaScannerConnection;
++import android.net.Uri;
++import android.os.Build;
++import android.os.Environment;
++import android.os.Handler;
++import android.os.Looper;
++import android.provider.MediaStore;
++import android.webkit.MimeTypeMap;
++import android.widget.Toast;
++
++import java.io.File;
++import java.io.FileInputStream;
++import java.io.FileOutputStream;
++import java.io.IOException;
++import java.io.InputStream;
++import java.io.OutputStream;
++import java.lang.reflect.Field;
++import java.lang.reflect.Method;
++import java.lang.reflect.Modifier;
++import java.net.HttpURLConnection;
++import java.net.URL;
++import java.util.List;
++import java.util.Locale;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++import java.util.concurrent.atomic.AtomicInteger;
++
++/**
++ * Downloads Zalo media to the public Pictures/Zalo or Movies/Zalo folders.
++ *
++ * Zalo serves some images as JPEG XL; those are converted through Zalo's own
++ * decoder when possible, with a .jxl fallback when conversion is unavailable.
++ */
++public final class MediaSaver
++{
++    private static final String FOLDER = "Zalo";
++    private static final String JXL = "image/jxl";
++    private static final int MAX_IN_FLIGHT = 3;
++    private static final String USER_AGENT = "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36";
++
++    private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(2, runnable ->
++    {
++        Thread thread = new Thread(runnable, "ZaloXposed-Download");
++        thread.setDaemon(true);
++        return thread;
++    });
++    private static final AtomicInteger IN_FLIGHT = new AtomicInteger();
++    private static final Handler MAIN = new Handler(Looper.getMainLooper());
++
++    private MediaSaver() { }
++
++    public static String text(boolean english, String en, String vi)
++    {
++        return english ? en : vi;
++    }
++
++    public static void toast(Context context, String text)
++    {
++        if (context == null || text == null || text.isEmpty())
++            return;
++        Context app = context.getApplicationContext();
++        if (app == null)
++            app = context;
++        final Context target = app;
++        MAIN.post(() ->
++        {
++            try
++            {
++                Toast.makeText(target, text, Toast.LENGTH_SHORT).show();
++            }
++            catch (Throwable ignored) { }
++        });
++    }
++
++    public static void save(Context context, String url, String name)
++    {
++        Context app = context.getApplicationContext();
++        if (app == null)
++            app = context;
++        final Context target = app;
++        if (IN_FLIGHT.incrementAndGet() > MAX_IN_FLIGHT)
++        {
++            IN_FLIGHT.decrementAndGet();
++            toast(target, text(Utils.IsEnglish(), "Too many downloads are running.", "Đang có quá nhiều lượt tải xuống."));
++            return;
++        }
++        toast(target, text(Utils.IsEnglish(), "Saving media...", "Đang lưu media..."));
++        EXECUTOR.execute(() ->
++        {
++            File temp = null;
++            try
++            {
++                temp = File.createTempFile("zaloxposed_", ".bin", target.getCacheDir());
++                String[] result = fetch(target, url, temp);
++                boolean video = result[0].startsWith("video/");
++                publish(target, temp, name + "." + result[1], result[0], video);
++                toast(target, text(Utils.IsEnglish(),
++                    video ? "Video saved to Movies/Zalo." : "Photo saved to Pictures/Zalo.",
++                    video ? "Đã lưu video vào Movies/Zalo." : "Đã lưu ảnh vào Pictures/Zalo."));
++            }
++            catch (Throwable t)
++            {
++                Logger.e("Download failed: " + t.getMessage());
++                String reason = t.getMessage();
++                if (reason == null || reason.isEmpty())
++                    reason = t.getClass().getSimpleName();
++                toast(target, text(Utils.IsEnglish(), "Download failed: ", "Tải xuống thất bại: ") + reason);
++            }
++            finally
++            {
++                if (temp != null && temp.exists())
++                    //noinspection ResultOfMethodCallIgnored
++                    temp.delete();
++                IN_FLIGHT.decrementAndGet();
++            }
++        });
++    }
++
++    public static void saveAll(Context context, List<String> urls, String name, int missing, int streams)
++    {
++        Context app = context.getApplicationContext();
++        if (app == null)
++            app = context;
++        final Context target = app;
++        if (urls == null || urls.isEmpty())
++            return;
++        if (IN_FLIGHT.incrementAndGet() > MAX_IN_FLIGHT)
++        {
++            IN_FLIGHT.decrementAndGet();
++            toast(target, text(Utils.IsEnglish(), "Too many downloads are running.", "Đang có quá nhiều lượt tải xuống."));
++            return;
++        }
++        toast(target, text(Utils.IsEnglish(),
++            "Saving " + urls.size() + " media item(s)...",
++            "Đang lưu " + urls.size() + " media..."));
++        EXECUTOR.execute(() ->
++        {
++            int saved = 0;
++            try
++            {
++                for (int i = 0; i < urls.size(); i++)
++                {
++                    File temp = null;
++                    try
++                    {
++                        temp = File.createTempFile("zaloxposed_", ".bin", target.getCacheDir());
++                        String[] result = fetch(target, urls.get(i), temp);
++                        boolean video = result[0].startsWith("video/");
++                        publish(target, temp, name + "_" + (i + 1) + "." + result[1], result[0], video);
++                        saved++;
++                    }
++                    catch (Throwable t)
++                    {
++                        Logger.e("Download failed " + (i + 1) + "/" + urls.size() + ": " + t.getMessage());
++                    }
++                    finally
++                    {
++                        if (temp != null && temp.exists())
++                            //noinspection ResultOfMethodCallIgnored
++                            temp.delete();
++                    }
++                }
++            }
++            finally
++            {
++                IN_FLIGHT.decrementAndGet();
++                StringBuilder message = new StringBuilder(text(Utils.IsEnglish(),
++                    "Saved " + saved + "/" + urls.size() + " media item(s).",
++                    "Đã lưu " + saved + "/" + urls.size() + " media."));
++                if (missing > 0)
++                    message.append('\n').append(text(Utils.IsEnglish(),
++                        missing + " more photo(s) are not in the feed payload.",
++                        missing + " ảnh khác không có trong dữ liệu bài viết."));
++                if (streams > 0)
++                    message.append('\n').append(text(Utils.IsEnglish(),
++                        streams + " HLS stream(s) were skipped.",
++                        streams + " luồng HLS đã được bỏ qua."));
++                toast(target, message.toString());
++            }
++        });
++    }
++
++    private static String[] fetch(Context context, String url, File temp) throws Exception
++    {
++        String mime = mimeOf(download(url, temp), url);
++        if (JXL.equals(mime) || isJxl(temp))
++        {
++            File jpeg = new File(temp.getPath() + ".jpg");
++            try
++            {
++                if (convertJxl(context.getClassLoader(), temp, jpeg))
++                {
++                    copyFile(jpeg, temp);
++                    mime = "image/jpeg";
++                }
++                else
++                    mime = JXL;
++            }
++            finally
++            {
++                if (jpeg.exists())
++                    //noinspection ResultOfMethodCallIgnored
++                    jpeg.delete();
++            }
++        }
++        String extension;
++        if (JXL.equals(mime))
++            extension = "jxl";
++        else
++        {
++            extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime);
++            if (extension == null || extension.isEmpty())
++                extension = mime.startsWith("video/") ? "mp4" : "jpg";
++        }
++        return new String[]{mime, extension};
++    }
++
++    private static String mimeOf(String header, String url)
++    {
++        if (header != null)
++        {
++            int separator = header.indexOf(';');
++            String clean = (separator >= 0 ? header.substring(0, separator) : header).trim().toLowerCase(Locale.ROOT);
++            if (clean.startsWith("video/") || clean.startsWith("image/"))
++                return clean;
++        }
++        String path = Uri.parse(url).getPath();
++        if (path == null)
++            path = url;
++        String extension = MimeTypeMap.getFileExtensionFromUrl(path).toLowerCase(Locale.ROOT);
++        String mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension);
++        return mime != null ? mime : "image/jpeg";
++    }
++
++    private static String download(String url, File destination) throws IOException
++    {
++        HttpURLConnection connection = (HttpURLConnection)new URL(url).openConnection();
++        connection.setConnectTimeout(15_000);
++        connection.setReadTimeout(30_000);
++        connection.setRequestProperty("User-Agent", USER_AGENT);
++        try
++        {
++            int code = connection.getResponseCode();
++            if (code < 200 || code > 299)
++                throw new IOException("HTTP " + code);
++            try (InputStream input = connection.getInputStream();
++                 OutputStream output = new FileOutputStream(destination))
++            {
++                byte[] buffer = new byte[64 * 1024];
++                int read;
++                while ((read = input.read(buffer)) != -1)
++                    output.write(buffer, 0, read);
++                output.flush();
++            }
++            return connection.getContentType();
++        }
++        finally
++        {
++            connection.disconnect();
++        }
++    }
++
++    private static void publish(Context context, File file, String name, String mime, boolean video) throws Exception
++    {
++        String root = video ? Environment.DIRECTORY_MOVIES : Environment.DIRECTORY_PICTURES;
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
++        {
++            ContentValues values = new ContentValues();
++            values.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
++            values.put(MediaStore.MediaColumns.MIME_TYPE, mime);
++            values.put(MediaStore.MediaColumns.RELATIVE_PATH, root + "/" + FOLDER);
++            values.put(MediaStore.MediaColumns.IS_PENDING, 1);
++            ContentResolver resolver = context.getContentResolver();
++            Uri collection = video ? MediaStore.Video.Media.EXTERNAL_CONTENT_URI : MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
++            Uri uri = resolver.insert(collection, values);
++            if (uri == null)
++                throw new IllegalStateException("MediaStore insert failed");
++            try
++            {
++                try (OutputStream output = resolver.openOutputStream(uri))
++                {
++                    if (output == null)
++                        throw new IOException("Cannot open MediaStore output");
++                    copyFile(file, output);
++                }
++                ContentValues done = new ContentValues();
++                done.put(MediaStore.MediaColumns.IS_PENDING, 0);
++                resolver.update(uri, done, null, null);
++            }
++            catch (Throwable t)
++            {
++                try
++                {
++                    resolver.delete(uri, null, null);
++                }
++                catch (Throwable ignored) { }
++                throw t;
++            }
++        }
++        else
++        {
++            File directory = new File(Environment.getExternalStoragePublicDirectory(root), FOLDER);
++            if (!directory.exists() && !directory.mkdirs())
++                throw new IllegalStateException("Cannot create " + directory.getAbsolutePath());
++            File destination = new File(directory, name);
++            try
++            {
++                copyFile(file, destination);
++            }
++            catch (IOException e)
++            {
++                throw new IllegalStateException(e);
++            }
++            MediaScannerConnection.scanFile(context, new String[]{destination.getPath()}, new String[]{mime}, null);
++        }
++    }
++
++    private static void copyFile(File source, File destination) throws IOException
++    {
++        try (InputStream input = new FileInputStream(source);
++             OutputStream output = new FileOutputStream(destination))
++        {
++            byte[] buffer = new byte[64 * 1024];
++            int read;
++            while ((read = input.read(buffer)) != -1)
++                output.write(buffer, 0, read);
++            output.flush();
++        }
++    }
++
++    private static void copyFile(File source, OutputStream output) throws IOException
++    {
++        try (InputStream input = new FileInputStream(source))
++        {
++            byte[] buffer = new byte[64 * 1024];
++            int read;
++            while ((read = input.read(buffer)) != -1)
++                output.write(buffer, 0, read);
++            output.flush();
++        }
++    }
++
++    private static boolean isJxl(File file)
++    {
++        byte[] head = new byte[8];
++        int read;
++        try (InputStream input = new FileInputStream(file))
++        {
++            read = input.read(head);
++        }
++        catch (Throwable t)
++        {
++            return false;
++        }
++        if (read >= 2 && (head[0] & 0xff) == 0xff && (head[1] & 0xff) == 0x0a)
++            return true;
++        if (read < 8)
++            return false;
++        byte[] container = new byte[]{0, 0, 0, 0x0c, 0x4a, 0x58, 0x4c, 0x20};
++        for (int i = 0; i < container.length; i++)
++        {
++            if (head[i] != container[i])
++                return false;
++        }
++        return true;
++    }
++
++    private static boolean convertJxl(ClassLoader loader, File source, File destination)
++    {
++        try
++        {
++            Class<?> decoder = Class.forName("com.zing.zalo.zmedia.zjxl.ZJXLDecoder", false, loader);
++            Class<?> options = Class.forName("com.zing.zalo.zmedia.zjxl.ZJXLDecoder$Options", false, loader);
++            Method info = null;
++            Method decode = null;
++            for (Method method : decoder.getDeclaredMethods())
++            {
++                if (!Modifier.isStatic(method.getModifiers())
++                    || Modifier.isNative(method.getModifiers())
++                    || method.getReturnType() != double.class)
++                    continue;
++                Class<?>[] parameters = method.getParameterTypes();
++                if (parameters.length == 2
++                    && parameters[0] == String.class
++                    && parameters[1] == options)
++                    info = method;
++                else if (parameters.length == 3
++                    && parameters[0] == String.class
++                    && parameters[1] == int.class
++                    && parameters[2] == Bitmap.class)
++                    decode = method;
++            }
++            if (info == null || decode == null)
++                return false;
++            Method error = decoder.getDeclaredMethod("jxlGetErrorCode", double.class);
++            error.setAccessible(true);
++            info.setAccessible(true);
++            decode.setAccessible(true);
++
++            Object optionValues = options.getDeclaredConstructor().newInstance();
++            Object infoResult = info.invoke(null, source.getPath(), optionValues);
++            if (!isJxlOk(error, infoResult))
++                return false;
++
++            Field widthField = options.getDeclaredField("bmPreviewWidth");
++            Field heightField = options.getDeclaredField("bmPreviewHeight");
++            widthField.setAccessible(true);
++            heightField.setAccessible(true);
++            int width = widthField.getInt(optionValues);
++            int height = heightField.getInt(optionValues);
++            if (width <= 0 || height <= 0)
++                return false;
++
++            Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
++            try
++            {
++                Object decodeResult = decode.invoke(null, source.getPath(), 1, bitmap);
++                if (!isJxlOk(error, decodeResult))
++                    return false;
++                try (OutputStream output = new FileOutputStream(destination))
++                {
++                    return bitmap.compress(Bitmap.CompressFormat.JPEG, 95, output);
++                }
++            }
++            finally
++            {
++                bitmap.recycle();
++            }
++        }
++        catch (Throwable t)
++        {
++            Logger.e("JXL conversion failed: " + t.getMessage());
++            return false;
++        }
++    }
++
++    private static boolean isJxlOk(Method errorMethod, Object result) throws Exception
++    {
++        Object code = errorMethod.invoke(null, result);
++        return code instanceof Number && ((Number)code).intValue() == 0;
++    }
++}
+diff --git a/app/src/main/java/io/github/electroheavenvn/zaloxposed/utilities/ZaloModel.java b/app/src/main/java/io/github/electroheavenvn/zaloxposed/utilities/ZaloModel.java
+new file mode 100644
+index 0000000..26e6c8c
+--- /dev/null
++++ b/app/src/main/java/io/github/electroheavenvn/zaloxposed/utilities/ZaloModel.java
+@@ -0,0 +1,174 @@
++package io.github.electroheavenvn.zaloxposed.utilities;
++
++import java.lang.reflect.Field;
++import java.lang.reflect.Method;
++import java.lang.reflect.Modifier;
++import java.util.Collections;
++import java.util.IdentityHashMap;
++import java.util.Set;
++
++/**
++ * Small reflection helpers used by the download menu and media saver.
++ *
++ * Zalo's models are heavily obfuscated and change between releases, so the
++ * hooks locate values by type and reachability instead of hard-coded field
++ * names wherever possible.
++ */
++public final class ZaloModel
++{
++    private ZaloModel() { }
++
++    public static Iterable<Field> fields(Class<?> type)
++    {
++        java.util.List<Field> result = new java.util.ArrayList<>();
++        Class<?> current = type;
++        while (current != null && current != Object.class)
++        {
++            for (Field field : current.getDeclaredFields())
++            {
++                if (!Modifier.isStatic(field.getModifiers()))
++                    result.add(field);
++            }
++            current = current.getSuperclass();
++        }
++        return result;
++    }
++
++    public static Object valueOfType(Object host, Class<?> type)
++    {
++        if (host == null)
++            return null;
++        for (Field field : fields(host.getClass()))
++        {
++            if (!type.isAssignableFrom(field.getType()))
++                continue;
++            try
++            {
++                field.setAccessible(true);
++                return field.get(host);
++            }
++            catch (Throwable ignored) { }
++        }
++        return null;
++    }
++
++    public static boolean holdsInt(Object host, int value)
++    {
++        if (host == null)
++            return false;
++        for (Field field : fields(host.getClass()))
++        {
++            if (field.getType() != int.class)
++                continue;
++            try
++            {
++                field.setAccessible(true);
++                if (field.getInt(host) == value)
++                    return true;
++            }
++            catch (Throwable ignored) { }
++        }
++        return false;
++    }
++
++    public static Object reachable(Object host, Class<?> type)
++    {
++        if (host == null || type == null)
++            return null;
++        if (type.isInstance(host))
++            return host;
++        for (Field field : fields(host.getClass()))
++        {
++            if (field.getType().isPrimitive()
++                || field.getType().getName().startsWith("java.")
++                || field.getType().getName().startsWith("android."))
++                continue;
++            Object value;
++            try
++            {
++                field.setAccessible(true);
++                value = field.get(host);
++            }
++            catch (Throwable ignored)
++            {
++                continue;
++            }
++            if (value == null)
++                continue;
++            if (type.isInstance(value))
++                return value;
++            for (Method method : value.getClass().getMethods())
++            {
++                if (method.getParameterCount() != 0 || method.getReturnType() != type)
++                    continue;
++                try
++                {
++                    method.setAccessible(true);
++                    Object result = method.invoke(value);
++                    if (result != null)
++                        return result;
++                }
++                catch (Throwable ignored) { }
++            }
++        }
++        return null;
++    }
++
++    public static Object find(Object host, Class<?> type, int depth)
++    {
++        if (host == null || type == null)
++            return null;
++        Set<Object> seen = Collections.newSetFromMap(new IdentityHashMap<>());
++        return find(host, type, depth, seen);
++    }
++
++    private static Object find(Object node, Class<?> type, int left, Set<Object> seen)
++    {
++        if (type.isInstance(node))
++            return node;
++        if (left == 0 || !seen.add(node))
++            return null;
++
++        for (Method method : node.getClass().getDeclaredMethods())
++        {
++            if (Modifier.isStatic(method.getModifiers())
++                || method.getParameterCount() != 0
++                || method.getReturnType() != type)
++                continue;
++            try
++            {
++                method.setAccessible(true);
++                Object result = method.invoke(node);
++                if (result != null)
++                    return result;
++            }
++            catch (Throwable ignored) { }
++        }
++
++        for (Field field : fields(node.getClass()))
++        {
++            String name = field.getType().getName();
++            if (field.getType().isPrimitive()
++                || name.startsWith("java.")
++                || name.startsWith("android.")
++                || name.startsWith("kotlin."))
++                continue;
++            Object value;
++            try
++            {
++                field.setAccessible(true);
++                value = field.get(node);
++            }
++            catch (Throwable ignored)
++            {
++                continue;
++            }
++            if (value == null)
++                continue;
++            Object result = find(value, type, left - 1, seen);
++            if (result != null)
++                return result;
++        }
++        return null;
++    }
++}
