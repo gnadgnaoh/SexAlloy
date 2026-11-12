@@ -1,0 +1,77 @@
+===== 19620f96282322079b8bc02f7c06d350d4c3a5f9 =====
+tree 180604af362029818f162833831401d0763cf8b6
+parent 3dc53071571cded57b7cc7475fe9d952caf8d771
+author XES SEX <117189041+gnadgnaoh@users.noreply.github.com> 1792887448 +0700
+committer GitHub <noreply@github.com> 1792887448 +0700
+gpgsig -----BEGIN PGP SIGNATURE-----
+ 
+ wsFcBAABCAAQBQJq3UqYCRC1aQ7uu5UhlAAATzMQACWYeTQSZAER6IuQ1jBcgkkP
+ s0CVw6mpoptMOlWRVQ1jwFBLdXNErTtZFn9cpBWFm46FjdgCdSI2q7GCnzjGaXBt
+ 3sx1I1R10LTZjarK9m+wEb0kq5PN/L1sl65kMdqcsRZIFoClex8iFzyvO+HOKi6B
+ hcPAzgr1adq6rUBPU97PVyJKExFReaoe680eY6IeVjPwAVUjH/SClOzxLBmCYEmu
+ GHvELoBm0ZPW02u707UpoqtkIpdoFrLqYrZx4a4ORG179ZbgGXaGSjLEHVjmM5S5
+ +4U8suSYgKtounYiOPork9CcrBPVtUnbd/oknqTVov81RP3kEsHHtaSu64Mp7Jbx
+ G0wrnWS1jQx7buqGiPY0E8VTyQAHc3Q6STAAZNUR/oC6t3hJN5sDonJvsHTCJJjK
+ 4vVA0uMsWCCKapGLNzVFdAxsRRcTyRFNfEIwzLM2BVn0E96GMmea/oH7fyEzu+Uj
+ LTCwNWHgs4JQnbA9rqYs3O7ahmzvBykIt3XC3cvXmJEVkM46L+K/TUNAZrwrfEmI
+ y11US4aer1/QPc3UlRq/NCCWEBlwVTejRLzNsaqaBiq3uwjMixSIdrZsmZYikBNm
+ mNRILmLg0LIcbX+tGWfapa1kvk5LPs/4rQsf3ZTcPflPNCTNLi+HUzU33A7ctFZ9
+ SrVFhufF9VOB9W5y6gW2
+ =rYe2
+ -----END PGP SIGNATURE-----
+ 
+
+Add download feature to stories and media menu
+
+This patch adds a download feature to the menu for friends' stories, photos, and videos, allowing users to download individual items or all items from timeline posts.
+===== af04e0c057b0997d4e29c9707ba9ac22bb91c8e7 =====
+tree 3fdf5e9788472459cb5c160d04f2d13a56808f9d
+parent 19620f96282322079b8bc02f7c06d350d4c3a5f9
+author XES SEX <117189041+gnadgnaoh@users.noreply.github.com> 1792887479 +0700
+committer GitHub <noreply@github.com> 1792887479 +0700
+gpgsig -----BEGIN PGP SIGNATURE-----
+ 
+ wsFcBAABCAAQBQJq3Uq3CRC1aQ7uu5UhlAAAAoMQAFxT/9JQSbVZG1FX001GcL1B
+ 7UsBg85KK25/Zkz9o/gpvGP098uO7u4diLaFFhwS0wix0kBr03i6gwv67AL/J66f
+ 2OIVB3KPcrFoDcgmJV/+uVfV50UrYch5Hx3m5s/fdI7w9Tkkn8E3QiLnhP00jmQ+
+ egeJeDcE6R2e+VRFYJZiftQ190Uba86nhU0PF8XdzL3iIMaxc/oXCwYSm12M9c+e
+ I8uw2LnvcgyUgBPH7tjNdFZgOdvIH8eBqPJ6gIiWDizkV7ZQJ10soOIsG/lRbAgF
+ igqwZW5Yzfvfj7wGtez59CY79wa+ZJFpT+YO2EjA0wd3dxTb6BTbf2oen/6jLB77
+ QrxqYQcQsMZHJxklg1DtRDj5Rj2TzQ5F9wA+2eIhaInu+v3YQqB1gQ5eP3dD9/qt
+ ADbZLtPDf6YeS92s+aIA/i/j3YlibEEnnWYC7n76bbTOvfjQJQYAFtzB0wWMO7oe
+ U48Eg+QnpN48nnoLr8AgmCSRGAlY5iFbT4rdCcVv2HsaGIFbyd3bD5bCAGjKR/hp
+ eqjvIKSexJrfozq9gtHO+W5CPboT9J+sFv+n++Sz/xSh0SL0ZirSx/VzC6QDkIH6
+ D9Ld1Mxtz2CqXqUskV7nl4Ab5iU0r8nFlJIFTRehuDimkSdseXEDctJ1GjDHoJo/
+ YVLOXPXBZqsvH9AWvDhT
+ =hM62
+ -----END PGP SIGNATURE-----
+ 
+
+Add download for Zalo (No Zalo Video)
+===== 53c191df7edb6cd637330d78297942a6c65f6a41 =====
+tree 69afdc026d2165d4535a76c3e994601e20310b7a
+parent af04e0c057b0997d4e29c9707ba9ac22bb91c8e7
+parent ef85bb17b067822cbe75a742eb852e21ad05f9e2
+author XES SEX <117189041+gnadgnaoh@users.noreply.github.com> 1792887764 +0700
+committer GitHub <noreply@github.com> 1792887764 +0700
+gpgsig -----BEGIN PGP SIGNATURE-----
+ 
+ wsFcBAABCAAQBQJq3UvUCRC1aQ7uu5UhlAAAdBwQAFJEqX7gfcxz1Jf+osrvoFeL
+ c5drtdOL4JWAUnBny72q4T3Gx7eKZFTWa7aZAxheCeoiF3WyQrZ+ZwV5n5Afi2dv
+ UHbAnHvX/u3v5XuXMR0bJklocDDc32YFH+1zzOclOm/U7pwDF9XDyFDCt77rFPOk
+ eM9n1dxud48UmRkKMVesrZbNckgQ1ozWQeEqAL84kdWoG5Ptl4Xd/2dkUy9OmSLd
+ A656tbOimOXQKEVQs2NCC2oqS+q+QIfibg/lWgMU9dIYoJ2Ki507udE+oCuLhIzX
+ V1cbdKrgqfe50gDRt2TijA8BBFYtDTcSG1apivWP5UCqTManMNWyLwZ35nJ9nHnk
+ Yn4Y6E+pHGkAuFYvINtgTNZKGjtu92MVr569ZOXkfXlHmEfSY00agz7IHzZmIPOQ
+ uZ1v4lgL1bxZUPyFDCovuU8Za24tT8+z/wzpoSYW1EuwwzSUBhGohrNByiOS6PYp
+ X26CCFOHK+YoJM8CXZWD9i0D/p9vvKOgKK4fgcmdKHQXsuufxCn87nVEsTDcmLlW
+ dtKY3gQY/CLNldDKoE0O9HOEDY1SCsq+TU+TpaC9DNAYufyDsPbptENR9qWiEftk
+ nLQymrZV1gCZpqVV83xFQZOkhslyXknf9Z0/4Dr7oobPSgw9WAq3ohcJwHK/2ymw
+ tDO/32QDNyobqGNzBHT6
+ =50gQ
+ -----END PGP SIGNATURE-----
+ 
+
+Merge pull request #50 from gnadgnaoh/hide-active-meta-zalo-tiktok
+
+Hide active meta zalo tiktok
