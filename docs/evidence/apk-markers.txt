@@ -1,0 +1,82 @@
+Markers of the Zalo Download patch inside NexAlloy-zvideo-tt-1.apk
+==================================================================
+APK size     : 14037024 bytes
+APK SHA-256  : 4b6843d983560f4af99c83714910ab57640039d4cee092adbe6bae6e372a9431
+classes.dex  : 3798696 bytes, SHA-256 e4ed78b7ca6dff1a7d8ec51dff81a8ed189b9cbf166e4a9cc1a07765502e3128
+resources.arsc SHA-256 b150c2825896eee84059283c7742df5a0c82137a37621e45c74c7246a11710ec
+Xposed scope (META-INF/xposed/scope.list) includes: com.zing.zalo
+versionName  : 2.0.111 (AndroidManifest.xml)
+Built from   : git revision e2244bbc5284653fe2f8a0a6761473b9d862cfbf (META-INF/version-control-info.textproto)
+Signing cert : CN=Android Debug, valid from 2026-10-18, SHA-256 B8:98:E1:E9:EC:86:61:05:C3:73:E6:69:8E:F4:93:BD:34:61:EE:64:A2:E7:7D:E1:09:81:FB:0C:50:D8:F1:2B
+
+1. String constants in classes.dex
+------------------------------------------------------------------
+  PRESENT  NexAlloy-ZL-DL
+           referenced by 1 method(s): Lc7;->newThread
+  PRESENT  Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36
+           referenced by 4 method(s): Lpa1;->d, Lqa1;->b, Lse2;->a, Lwq2;->a
+  PRESENT  com.zing.zalo.zmedia.zjxl.ZJXLDecoder
+           referenced by 1 method(s): Lec0;->e
+  PRESENT  jxlGetErrorCode
+           referenced by 1 method(s): Lec0;->e
+  PRESENT  image/jxl
+           referenced by 1 method(s): Lwq2;->a
+  PRESENT  ic_bottom_sheet_story_download
+           referenced by 1 method(s): Luu;->h
+  PRESENT  str_bottom_sheet_story_download_tittle
+           referenced by 1 method(s): Luu;->h
+  PRESENT  ic_bottom_sheet_menu_download
+           referenced by 1 method(s): Lvu;->h
+  PRESENT  str_bottom_sheet_menu_photo_download
+           referenced by 1 method(s): Lvu;->h
+  PRESENT  str_bottom_sheet_menu_video_download
+           referenced by 2 method(s): Lju;->h, Lvu;->h
+  PRESENT  com.zing.zalo.social.features.menu_feed.model.BottomSheetMenuBundleData
+           referenced by 1 method(s): Lgt;->h
+  PRESENT  more_photo
+           referenced by 1 method(s): Lvu;->h
+  PRESENT  feed_
+           referenced by 1 method(s): Lvu;->h
+  PRESENT  zalo_story_
+           referenced by 1 method(s): Lju;->h
+  PRESENT  dataStoryViewFull
+           referenced by 2 method(s): Lsa0;->h, Lz90;->h
+  ABSENT   report_story_ad
+
+2. Integer literals 20056 and 20057 in the bytecode
+------------------------------------------------------------------
+  Luu;->h(Ljava/lang/Object;)Ljava/lang/Object;
+      literals: [20056]
+      strings in the same method: "java.", "android.", "drawable", "ic_bottom_sheet_story_download", "string", "str_bottom_sheet_story_download_tittle"
+      calls: Landroid/content/res/Resources;->getIdentifier(Ljava/lang/String; Ljava/lang/String; Ljava/lang/String;)I, Landroid/content/res/Resources;->getString(I)Ljava/lang/String;, Ljava/lang/reflect/Method;->invoke(Ljava/lang/Object; [Ljava/lang/Object;)Ljava/lang/Object;
+  Lvu;->h(Ljava/lang/Object;)Ljava/lang/Object;
+      literals: [20057]
+      strings in the same method: "drawable", "ic_bottom_sheet_menu_download", "str_bottom_sheet_menu_photo_download", "str_bottom_sheet_menu_video_download", "string", "content", "fid", "feed_"
+      calls: Landroid/content/res/Resources;->getIdentifier(Ljava/lang/String; Ljava/lang/String; Ljava/lang/String;)I, Landroid/content/res/Resources;->getString(I)Ljava/lang/String;, Ljava/lang/reflect/Method;->invoke(Ljava/lang/Object; [Ljava/lang/Object;)Ljava/lang/Object;
+
+3. String resources in resources.arsc
+------------------------------------------------------------------
+  zl_dl_all_done
+  zl_dl_all_menu
+  zl_dl_all_more
+  zl_dl_all_start
+  zl_dl_all_stream
+  zl_dl_busy
+  zl_dl_diag_done
+  zl_dl_diag_start
+  zl_dl_failed
+  zl_dl_no_media
+  zl_dl_saved_photo
+  zl_dl_saved_video
+  zl_dl_saving
+  zl_dl_stream_only
+  "Download all %1$d items"
+  "Download all (%1$d)"
+
+4. How to reproduce
+------------------------------------------------------------------
+  sha256sum NexAlloy-zvideo-tt-1.apk
+  unzip -o NexAlloy-zvideo-tt-1.apk classes.dex resources.arsc META-INF/xposed/scope.list
+  strings -n 5 classes.dex | grep -E 'NexAlloy-ZL-DL|ZJXLDecoder|dataStoryViewFull|report_story_ad|bottom_sheet_.*download|zalo_story_'
+  strings -n 5 resources.arsc | grep -E 'zl_dl_|Download all'
+  Section 2 was produced with androguard 4.1.4 (AnalyzeDex), listing const/16 and const instructions.
