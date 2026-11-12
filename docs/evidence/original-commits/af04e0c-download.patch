@@ -1,0 +1,425 @@
+commit af04e0c057b0997d4e29c9707ba9ac22bb91c8e7
+Author: XES SEX <117189041+gnadgnaoh@users.noreply.github.com>
+Date:   2026-10-25 07:17:59 +0700
+
+    Add download for Zalo (No Zalo Video)
+---
+ app/src/main/java/io/github/nexalloy/revanced/zalo/download/FeedMedia.kt    |  43 ++++++++
+ app/src/main/java/io/github/nexalloy/revanced/zalo/download/Fingerprints.kt |  51 ++++++++++
+ app/src/main/java/io/github/nexalloy/revanced/zalo/download/ZaloJxl.kt      |  46 +++++++++
+ app/src/main/java/io/github/nexalloy/revanced/zalo/download/ZaloModel.kt    |  48 +++++++++
+ app/src/main/java/io/github/nexalloy/revanced/zalo/download/ZaloSaver.kt    | 194 ++++++++++++++++++++++++++++++++++++
+ 5 files changed, 382 insertions(+)
+
+diff --git a/app/src/main/java/io/github/nexalloy/revanced/zalo/download/FeedMedia.kt b/app/src/main/java/io/github/nexalloy/revanced/zalo/download/FeedMedia.kt
+new file mode 100644
+index 00000000..57e83dfa
+--- /dev/null
++++ b/app/src/main/java/io/github/nexalloy/revanced/zalo/download/FeedMedia.kt
+@@ -0,0 +1,43 @@
++package io.github.nexalloy.revanced.zalo.download
++
++import org.json.JSONArray
++import org.json.JSONObject
++import java.lang.reflect.Method
++
++internal class FeedMedia(val id: String, val urls: List<String>, val missing: Int, val streams: Int, val videos: Int) {
++    companion object {
++        private const val ORIGIN = "origin"
++        private const val THUMB = "thumb"
++        private const val HLS = "hls"
++        private const val MORE = "more_photo"
++        private const val VIDEO = "video"
++
++        fun of(feedJson: Method, feed: Any): FeedMedia? {
++            val json = runCatching { feedJson.invoke(feed) as? JSONObject }.getOrNull() ?: return null
++            val content = json.optJSONObject("content") ?: return null
++            val urls = LinkedHashSet<String>()
++            var streams = 0
++            var videos = 0
++            fun walk(node: Any?, key: String?) {
++                when (node) {
++                    is JSONObject -> {
++                        val origin = link(node.optString(ORIGIN))
++                        val hls = node.optString(HLS).isNotBlank()
++                        when {
++                            origin != null -> if (urls.add(origin) && key == VIDEO) videos++
++                            hls -> streams++
++                            node.has(ORIGIN) -> link(node.optString(THUMB))?.let { urls.add(it) }
++                        }
++                        node.keys().forEach { walk(node.opt(it), it) }
++                    }
++                    is JSONArray -> for (i in 0 until node.length()) walk(node.opt(i), key)
++                }
++            }
++            walk(content, null)
++            val id = "feed_" + json.optString("fid").filter { it.isLetterOrDigit() }.ifEmpty { System.currentTimeMillis().toString() }
++            return FeedMedia(id, urls.toList(), content.optInt(MORE).coerceAtLeast(0), streams, videos)
++        }
++
++        private fun link(value: String): String? = value.takeIf { it.startsWith("http") && !it.contains(".m3u8") }
++    }
++}
+diff --git a/app/src/main/java/io/github/nexalloy/revanced/zalo/download/Fingerprints.kt b/app/src/main/java/io/github/nexalloy/revanced/zalo/download/Fingerprints.kt
+new file mode 100644
+index 00000000..5212a083
+--- /dev/null
++++ b/app/src/main/java/io/github/nexalloy/revanced/zalo/download/Fingerprints.kt
+@@ -0,0 +1,51 @@
++package io.github.nexalloy.revanced.zalo.download
++
++import io.github.nexalloy.morphe.findMethodDirect
++import java.lang.reflect.Modifier
++
++private const val STORY_MENU_DATA = "dataStoryViewFull"
++private const val MENU_VIEW = "com.zing.zalo.social.features.menu_feed.BottomSheetMenuView"
++
++val storyMenuBuilderFingerprint = findMethodDirect {
++    findMethod { matcher { usingStrings(STORY_MENU_DATA); returnType = "java.util.List" } }.single()
++}
++
++val menuItemFactoryFingerprint = findMethodDirect {
++    storyMenuBuilderFingerprint().invokes.filter { m ->
++        m.isMethod && Modifier.isStatic(m.modifiers) && m.paramCount == 10 && m.returnTypeName != "void" &&
++            "android.graphics.drawable.Drawable" in m.paramTypeNames
++    }.distinctBy { it.descriptor }.single()
++}
++
++val menuItemClickFingerprint = findMethodDirect {
++    val item = menuItemFactoryFingerprint().returnTypeName
++    findMethod { matcher { declaredClass(MENU_VIEW); paramTypes(item); returnType = "void" } }.single()
++}
++
++val storyJsonFingerprint = findMethodDirect {
++    findMethod {
++        matcher { usingStrings("urlHls", "serverFileId", "delayTime"); returnType = "org.json.JSONObject"; paramCount = 0 }
++    }.single { !Modifier.isStatic(it.modifiers) }
++}
++
++const val PHOTO_DOWNLOAD_ID = 0x17
++const val VIDEO_DOWNLOAD_ID = 0x1c
++
++val viewfullMenuFingerprint = findMethodDirect {
++    findMethod {
++        matcher {
++            declaredClass(MENU_VIEW)
++            paramTypes("android.os.Bundle")
++            returnType = "void"
++            usingStrings("EXTRA_BUNDLE_DATA", "hiddenAreaHeight")
++            usingNumbers(PHOTO_DOWNLOAD_ID, VIDEO_DOWNLOAD_ID)
++        }
++    }.single()
++}
++
++val feedJsonFingerprint = findMethodDirect {
++    findMethod {
++        matcher { usingStrings("fid", "ftype", "feed_title", "content"); returnType = "org.json.JSONObject"; paramCount = 0 }
++    }.single { !Modifier.isStatic(it.modifiers) }
++}
++
+diff --git a/app/src/main/java/io/github/nexalloy/revanced/zalo/download/ZaloJxl.kt b/app/src/main/java/io/github/nexalloy/revanced/zalo/download/ZaloJxl.kt
+new file mode 100644
+index 00000000..5289b2ee
+--- /dev/null
++++ b/app/src/main/java/io/github/nexalloy/revanced/zalo/download/ZaloJxl.kt
+@@ -0,0 +1,46 @@
++package io.github.nexalloy.revanced.zalo.download
++
++import android.graphics.Bitmap
++import java.io.File
++import java.io.FileInputStream
++import java.io.FileOutputStream
++import java.lang.reflect.Modifier
++
++internal object ZaloJxl {
++    private const val DECODER = "com.zing.zalo.zmedia.zjxl.ZJXLDecoder"
++    private const val ERROR = "jxlGetErrorCode"
++    private const val WIDTH = "bmPreviewWidth"
++    private const val HEIGHT = "bmPreviewHeight"
++    private const val QUALITY = 95
++    private val CODESTREAM = byteArrayOf(0xFF.toByte(), 0x0A)
++    private val CONTAINER = byteArrayOf(0, 0, 0, 0x0C, 0x4A, 0x58, 0x4C, 0x20)
++
++    fun isJxl(file: File): Boolean {
++        val head = ByteArray(8)
++        val read = runCatching { FileInputStream(file).use { it.read(head) } }.getOrDefault(0)
++        if (read >= 2 && head[0] == CODESTREAM[0] && head[1] == CODESTREAM[1]) return true
++        return read >= 8 && head.contentEquals(CONTAINER)
++    }
++
++    fun toJpeg(loader: ClassLoader, src: File, dest: File): Boolean {
++        val decoder = loader.loadClass(DECODER)
++        val options = loader.loadClass("$DECODER\$Options")
++        val statics = decoder.declaredMethods.filter { Modifier.isStatic(it.modifiers) && !Modifier.isNative(it.modifiers) && it.returnType == Double::class.javaPrimitiveType }
++        val info = statics.single { it.parameterTypes.contentEquals(arrayOf(String::class.java, options)) }
++        val decode = statics.single { it.parameterTypes.contentEquals(arrayOf(String::class.java, Int::class.javaPrimitiveType, Bitmap::class.java)) }
++        val error = decoder.getDeclaredMethod(ERROR, Double::class.javaPrimitiveType).apply { isAccessible = true }
++        fun ok(result: Any?) = (error.invoke(null, result) as Int) == 0
++        val opts = options.getDeclaredConstructor().newInstance()
++        if (!ok(info.invoke(null, src.path, opts))) return false
++        val width = options.getField(WIDTH).getInt(opts)
++        val height = options.getField(HEIGHT).getInt(opts)
++        if (width <= 0 || height <= 0) return false
++        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
++        try {
++            if (!ok(decode.invoke(null, src.path, 1, bitmap))) return false
++            return FileOutputStream(dest).use { bitmap.compress(Bitmap.CompressFormat.JPEG, QUALITY, it) }
++        } finally {
++            bitmap.recycle()
++        }
++    }
++}
+diff --git a/app/src/main/java/io/github/nexalloy/revanced/zalo/download/ZaloModel.kt b/app/src/main/java/io/github/nexalloy/revanced/zalo/download/ZaloModel.kt
+new file mode 100644
+index 00000000..da00beca
+--- /dev/null
++++ b/app/src/main/java/io/github/nexalloy/revanced/zalo/download/ZaloModel.kt
+@@ -0,0 +1,48 @@
++package io.github.nexalloy.revanced.zalo.download
++
++import java.lang.reflect.Modifier
++
++internal object ZaloModel {
++    private fun fields(type: Class<*>) = generateSequence(type) { it.superclass }
++        .takeWhile { it != Any::class.java }
++        .flatMap { it.declaredFields.asSequence() }
++        .filter { !Modifier.isStatic(it.modifiers) }
++
++    fun valueOfType(host: Any, type: Class<*>): Any? = fields(host.javaClass)
++        .firstOrNull { type.isAssignableFrom(it.type) }
++        ?.let { runCatching { it.isAccessible = true; it.get(host) }.getOrNull() }
++
++    fun holdsInt(host: Any, value: Int): Boolean = fields(host.javaClass)
++        .filter { it.type == Int::class.javaPrimitiveType }
++        .any { runCatching { it.isAccessible = true; it.getInt(host) == value }.getOrDefault(false) }
++
++    fun reachable(host: Any, type: Class<*>): Any? {
++        if (type.isInstance(host)) return host
++        for (f in fields(host.javaClass)) {
++            if (f.type.isPrimitive || f.type.name.startsWith("java.") || f.type.name.startsWith("android.")) continue
++            val value = runCatching { f.isAccessible = true; f.get(host) }.getOrNull() ?: continue
++            if (type.isInstance(value)) return value
++            value.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.returnType == type }
++                ?.let { m -> runCatching { m.invoke(value) }.getOrNull()?.let { return it } }
++        }
++        return null
++    }
++
++    fun find(host: Any, type: Class<*>, depth: Int = 3): Any? {
++        val seen = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Any, Boolean>())
++        fun go(node: Any, left: Int): Any? {
++            if (type.isInstance(node)) return node
++            if (left == 0 || !seen.add(node)) return null
++            node.javaClass.declaredMethods.firstOrNull { !Modifier.isStatic(it.modifiers) && it.parameterCount == 0 && it.returnType == type }
++                ?.let { m -> runCatching { m.isAccessible = true; m.invoke(node) }.getOrNull()?.let { return it } }
++            for (f in fields(node.javaClass)) {
++                val name = f.type.name
++                if (f.type.isPrimitive || name.startsWith("java.") || name.startsWith("android.") || name.startsWith("kotlin.")) continue
++                val value = runCatching { f.isAccessible = true; f.get(node) }.getOrNull() ?: continue
++                go(value, left - 1)?.let { return it }
++            }
++            return null
++        }
++        return go(host, depth)
++    }
++}
+diff --git a/app/src/main/java/io/github/nexalloy/revanced/zalo/download/ZaloSaver.kt b/app/src/main/java/io/github/nexalloy/revanced/zalo/download/ZaloSaver.kt
+new file mode 100644
+index 00000000..0f224988
+--- /dev/null
++++ b/app/src/main/java/io/github/nexalloy/revanced/zalo/download/ZaloSaver.kt
+@@ -0,0 +1,194 @@
++package io.github.nexalloy.revanced.zalo.download
++
++import android.content.ContentValues
++import android.content.Context
++import android.content.pm.ApplicationInfo
++import android.content.res.Resources
++import android.media.MediaScannerConnection
++import android.net.Uri
++import android.os.Build
++import android.os.Environment
++import android.os.Handler
++import android.os.Looper
++import android.provider.MediaStore
++import android.webkit.MimeTypeMap
++import android.widget.Toast
++import androidx.annotation.StringRes
++import app.morphe.extension.shared.Logger
++import io.github.nexalloy.BuildConfig
++import io.github.nexalloy.R
++import io.github.nexalloy.modulePath
++import java.io.File
++import java.io.FileInputStream
++import java.io.FileOutputStream
++import java.io.IOException
++import java.net.HttpURLConnection
++import java.net.URL
++import java.util.Locale
++import java.util.concurrent.Executors
++import java.util.concurrent.atomic.AtomicInteger
++
++internal object ZaloSaver {
++    private const val FOLDER = "Zalo"
++    private const val JXL = "image/jxl"
++    private const val MAX_IN_FLIGHT = 3
++    private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36"
++
++    private val executor = Executors.newFixedThreadPool(2) { r -> Thread(r, "NexAlloy-ZL-DL").apply { isDaemon = true } }
++    private val inFlight = AtomicInteger()
++    private val main = Handler(Looper.getMainLooper())
++
++    @Volatile
++    private var module: Resources? = null
++
++    private fun resources(ctx: Context): Resources = module ?: (runCatching {
++        ctx.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY).resources
++    }.getOrNull() ?: run {
++        val info = ctx.packageManager.getPackageArchiveInfo(modulePath, 0)?.applicationInfo ?: ApplicationInfo()
++        info.sourceDir = modulePath
++        info.publicSourceDir = modulePath
++        val loaded = ctx.packageManager.getResourcesForApplication(info)
++        @Suppress("DEPRECATION")
++        Resources(loaded.assets, ctx.resources.displayMetrics, ctx.resources.configuration)
++    }).also { module = it }
++
++    fun t(ctx: Context, @StringRes id: Int, vararg args: Any?): String = runCatching {
++        val res = resources(ctx)
++        if (args.isEmpty()) res.getString(id) else res.getString(id, *args)
++    }.onFailure { Logger.printInfo { "Zalo: module string unavailable: $it" } }.getOrDefault("")
++
++    fun toast(ctx: Context, text: String, long: Boolean = false) {
++        if (text.isEmpty()) return
++        main.post { runCatching { Toast.makeText(ctx, text, if (long) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show() } }
++    }
++
++    fun save(ctx: Context, url: String, name: String) {
++        val app = ctx.applicationContext ?: ctx
++        if (inFlight.incrementAndGet() > MAX_IN_FLIGHT) {
++            inFlight.decrementAndGet()
++            return toast(app, t(app, R.string.zl_dl_busy))
++        }
++        toast(app, t(app, R.string.zl_dl_saving))
++        executor.execute {
++            val temp = File.createTempFile("nexalloy_zl_", ".bin", app.cacheDir)
++            try {
++                val (mime, ext) = fetch(app, url, temp)
++                val video = mime.startsWith("video/")
++                publish(app, temp, "$name.$ext", mime, video)
++                toast(app, t(app, if (video) R.string.zl_dl_saved_video else R.string.zl_dl_saved_photo))
++            } catch (e: Throwable) {
++                Logger.printException({ "Zalo: download failed" }, e)
++                toast(app, t(app, R.string.zl_dl_failed, e.message ?: e.javaClass.simpleName))
++            } finally {
++                temp.delete()
++                inFlight.decrementAndGet()
++            }
++        }
++    }
++
++    fun saveAll(ctx: Context, urls: List<String>, name: String, missing: Int, streams: Int) {
++        val app = ctx.applicationContext ?: ctx
++        if (inFlight.incrementAndGet() > MAX_IN_FLIGHT) {
++            inFlight.decrementAndGet()
++            return toast(app, t(app, R.string.zl_dl_busy))
++        }
++        toast(app, t(app, R.string.zl_dl_all_start, urls.size))
++        executor.execute {
++            var saved = 0
++            try {
++                urls.forEachIndexed { i, url ->
++                    val temp = File.createTempFile("nexalloy_zl_", ".bin", app.cacheDir)
++                    try {
++                        val (mime, ext) = fetch(app, url, temp)
++                        val video = mime.startsWith("video/")
++                        publish(app, temp, "${name}_${i + 1}.$ext", mime, video)
++                        saved++
++                    } catch (e: Throwable) {
++                        Logger.printException({ "Zalo: download failed ${i + 1}/${urls.size}" }, e)
++                    } finally {
++                        temp.delete()
++                    }
++                }
++            } finally {
++                inFlight.decrementAndGet()
++                val lines = mutableListOf(t(app, R.string.zl_dl_all_done, saved, urls.size))
++                if (missing > 0) lines += t(app, R.string.zl_dl_all_more, missing)
++                if (streams > 0) lines += t(app, R.string.zl_dl_all_stream, streams)
++                toast(app, lines.filter { it.isNotEmpty() }.joinToString("\n"), lines.size > 1)
++            }
++        }
++    }
++
++    private fun fetch(app: Context, url: String, temp: File): Pair<String, String> {
++        var mime = mimeOf(download(url, temp), url)
++        if (mime == JXL || ZaloJxl.isJxl(temp)) {
++            val jpeg = File(temp.path + ".jpg")
++            try {
++                if (runCatching { ZaloJxl.toJpeg(app.classLoader, temp, jpeg) }
++                        .onFailure { Logger.printException({ "Zalo: JXL convert failed" }, it) }.getOrDefault(false)) {
++                    jpeg.copyTo(temp, overwrite = true)
++                    mime = "image/jpeg"
++                } else {
++                    mime = JXL
++                }
++            } finally {
++                jpeg.delete()
++            }
++        }
++        val ext = when (mime) {
++            JXL -> "jxl"
++            else -> MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) ?: if (mime.startsWith("video/")) "mp4" else "jpg"
++        }
++        return mime to ext
++    }
++
++    private fun mimeOf(header: String?, url: String): String {
++        val clean = header?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT)
++        if (clean != null && (clean.startsWith("video/") || clean.startsWith("image/"))) return clean
++        val ext = MimeTypeMap.getFileExtensionFromUrl(Uri.parse(url).path ?: url).lowercase(Locale.ROOT)
++        return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "image/jpeg"
++    }
++
++    private fun download(url: String, dest: File): String? {
++        val conn = URL(url).openConnection() as HttpURLConnection
++        conn.connectTimeout = 15_000
++        conn.readTimeout = 30_000
++        conn.setRequestProperty("User-Agent", USER_AGENT)
++        try {
++            if (conn.responseCode !in 200..299) throw IOException("HTTP ${conn.responseCode}")
++            conn.inputStream.use { input -> FileOutputStream(dest).use { input.copyTo(it, 64 * 1024) } }
++            return conn.contentType
++        } finally {
++            conn.disconnect()
++        }
++    }
++
++    private fun publish(ctx: Context, file: File, name: String, mime: String, video: Boolean) {
++        val root = if (video) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
++            val values = ContentValues().apply {
++                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
++                put(MediaStore.MediaColumns.MIME_TYPE, mime)
++                put(MediaStore.MediaColumns.RELATIVE_PATH, "$root/$FOLDER")
++                put(MediaStore.MediaColumns.IS_PENDING, 1)
++            }
++            val collection = if (video) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
++            val resolver = ctx.contentResolver
++            val uri = resolver.insert(collection, values) ?: throw IOException("MediaStore insert failed")
++            try {
++                resolver.openOutputStream(uri)!!.use { out -> FileInputStream(file).use { it.copyTo(out, 64 * 1024) } }
++                resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
++            } catch (e: Throwable) {
++                resolver.delete(uri, null, null)
++                throw e
++            }
++        } else {
++            @Suppress("DEPRECATION")
++            val dir = File(Environment.getExternalStoragePublicDirectory(root), FOLDER)
++            dir.mkdirs()
++            val dest = File(dir, name)
++            file.copyTo(dest, overwrite = true)
++            MediaScannerConnection.scanFile(ctx, arrayOf(dest.path), arrayOf(mime), null)
++        }
++    }
++}
