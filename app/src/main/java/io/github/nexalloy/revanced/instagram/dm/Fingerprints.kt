@@ -92,6 +92,11 @@ private val MESSAGE_FIELD_KEYS = listOf(
 private fun DexKitBridge.messageFields(): Map<String, FieldData> = once("messageFields") {
     val parser = messageParserClass()
     val found = HashMap<String, FieldData>(MESSAGE_FIELD_KEYS.size)
+    val modelClasses = parser.methods.filter(::isJsonEntryPoint)
+        .flatMap { m -> runCatching { m.usingFields }.getOrDefault(emptyList()) }
+        .filter { it.usingType == org.luckypray.dexkit.result.FieldUsingType.Write }
+        .map { it.field.declaredClassName }.toSet()
+    fun isModelField(f: FieldData) = modelClasses.isEmpty() || f.declaredClassName in modelClasses
 
     for (method in parser.methods) {
         if (found.size == MESSAGE_FIELD_KEYS.size) break
@@ -110,6 +115,7 @@ private fun DexKitBridge.messageFields(): Map<String, FieldData> = once("message
                 .drop(keyIndex + 1)
                 .firstOrNull { it.opcode in INSTANCE_FIELD_WRITES }
                 ?.fieldRef
+                ?.takeIf(::isModelField)
                 ?.let { found[key] = it }
         }
     }
@@ -125,7 +131,7 @@ private fun DexKitBridge.messageFields(): Map<String, FieldData> = once("message
                 code[at].methodRef?.descriptor in pools && code.drop(at + 1).take(4)
                     .any { it.methodRef?.let { m -> m.name == "equals" && m.declaredClassName == STRING } == true }
             }.map { at -> code.drop(at + 1).firstOrNull { it.opcode in INSTANCE_FIELD_WRITES }?.fieldRef }
-        }
+        }.filterNotNull().filter(::isModelField).distinctBy { it.descriptor }
         sites.singleOrNull()?.let { found[key] = it }
     }
     found
@@ -213,6 +219,28 @@ internal val messageMenuActionGuardsFingerprint = findFieldListDirect {
         guard to code[at].fieldRef!!
     }.distinctBy { (g, a) -> g.descriptor + a.descriptor }.flatMap { (g, a) -> listOf(g, a) }
 }
+
+internal val messageActionFlagMapFingerprint = findFieldListDirect {
+    val config = messageMenuActionGuardsFingerprint().first().declaredClassName
+    val mapper = findMethod {
+        matcher { declaredClass(config); returnType = "boolean"; paramCount = 1 }
+    }.single { m -> m.paramTypes.single().isAbstractBase() }
+    val pairs = ArrayList<FieldData>()
+    var action: FieldData? = null
+    for (i in mapper.instructions) {
+        val f = i.fieldRef ?: continue
+        when {
+            i.opcode == OP_SGET_OBJECT && f.typeName == f.declaredClassName -> action = f
+            i.opcode == OP_IGET_BOOLEAN && f.declaredClassName == config && action != null -> {
+                pairs += action!!; pairs += f; action = null
+            }
+        }
+    }
+    pairs
+}
+
+private fun ClassData.isAbstractBase() =
+    java.lang.reflect.Modifier.isAbstract(modifiers) && !java.lang.reflect.Modifier.isInterface(modifiers)
 
 internal val messageMenuModelBuildersFingerprint = findMethodListDirect {
     val model = messageMenuActionGuardsFingerprint().first().declaredClassName
