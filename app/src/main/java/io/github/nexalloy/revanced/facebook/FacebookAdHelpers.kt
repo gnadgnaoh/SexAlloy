@@ -660,11 +660,12 @@ fun hookListResultFilter(method: Method, source: String, inspector: AdStoryInspe
 fun hookPluginPackFallback(method: Method, inspector: AdStoryInspector) {
     method.hookMethod {
         before { param ->
-            if (isAdOnlyPluginPack(param.thisObject)) {
-                param.result = arrayListOf<Any?>(); return@before
+            val emptyResult = buildEmptyListReturn(method.returnType)
+            if (emptyResult != null && isAdOnlyPluginPack(param.thisObject)) {
+                param.result = emptyResult; return@before
             }
-            if (inspector.containsAdStory(param.thisObject)) {
-                param.result = arrayListOf<Any?>()
+            if (emptyResult != null && inspector.containsAdStory(param.thisObject)) {
+                param.result = emptyResult
             }
         }
         after { param ->
@@ -699,7 +700,7 @@ fun hookPluginPackList(method: Method) {
             val instance = param.thisObject ?: return@after
             if (!isAdOnlyPluginPack(instance)) return@after
             if ((param.result as? Collection<*>)?.isEmpty() == true) return@after
-            param.result = emptyList<Any?>()
+            buildEmptyListReturn(method.returnType)?.let { param.result = it }
         }
     }
 }
@@ -872,7 +873,7 @@ fun hookSponsoredStoryNext(method: Method) {
 fun hookSponsoredPoolListMethods(poolClass: Class<*>) {
     poolClass.declaredMethods.filter { m -> !m.isStatic && m.parameterCount == 0 && List::class.java.isAssignableFrom(m.returnType) }.forEach { m ->
         m.isAccessible = true
-        m.hookMethod { before { param -> param.result = arrayListOf<Any?>() } }
+        m.hookMethod { before { param -> buildEmptyListReturn(m.returnType)?.let { param.result = it } } }
     }
 }
 
@@ -905,21 +906,6 @@ private fun isSponsoredStoryListMethod(method: Method): Boolean {
     }
     return method.parameterTypes.all { type ->
         type == Int::class.javaPrimitiveType || type == Long::class.javaPrimitiveType || type == Boolean::class.javaPrimitiveType
-    }
-}
-
-private fun buildEmptyListReturn(returnType: Class<*>): Any? {
-    if (returnType.name == "com.google.common.collect.ImmutableList") {
-        return runCatching {
-            val of = returnType.getDeclaredMethod("of")
-            of.isAccessible = true
-            of.invoke(null)
-        }.getOrNull()
-    }
-    return when {
-        returnType.isAssignableFrom(ArrayList::class.java) -> arrayListOf<Any?>()
-        Iterable::class.java.isAssignableFrom(returnType) -> emptyList<Any?>()
-        else -> null
     }
 }
 

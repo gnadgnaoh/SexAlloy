@@ -155,6 +155,7 @@ dependencies {
     implementation(libs.fuel)
     implementation(platform(libs.okhttp.bom))
     testImplementation(kotlin("test-junit5"))
+    testImplementation("com.google.guava:guava:33.4.0-jre")
     testImplementation(libs.junit.jupiter.params)
     testImplementation(libs.jadx.core)
     testImplementation(libs.slf4j.simple)
