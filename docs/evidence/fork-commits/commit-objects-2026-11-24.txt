@@ -1,0 +1,43 @@
+Commits added to soctrungkien/ZaloXposed main on top of upstream 6806c9a (raw objects, git cat-file -p).
+Old fork commits for comparison: 9d5b7bf13940e8eed299a6e00627e8965f34df79, 128fc79c1ddb0cc42c1b192f3f8e84ef91bd99ba, 23895baddbfbd93caab39e2b511b4d47fc0509b6 (no longer on any branch).
+
+===== bc4e4aea27062c8ca5be5acc52515955cf119709 =====
+tree fab3eae4047f692a01902dc94add1f89f9088df0
+parent 6806c9aee0e54ab2c9a6d7a2de6f2fed101212ea
+author soctrungkien <soctrungkien@hotmail.com> 1795512262 +0700
+committer soctrungkien <soctrungkien@hotmail.com> 1795512262 +0700
+
+Apply upstream feature diff and auto-fetch native libs from release APK
+
+===== 1b2f0dc4163927bc004c81728202af4789a59bbd =====
+tree f07ee655dfbc95f90d67264bebe862f3f7ecd439
+parent bc4e4aea27062c8ca5be5acc52515955cf119709
+author soctrungkien <soctrungkien@hotmail.com> 1795513013 +0700
+committer soctrungkien <soctrungkien@hotmail.com> 1795513013 +0700
+
+Fix build: bridge legacy hook API and restore fork settings helpers
+
+===== c887a7aa7a0ef42860f2a3d5a056eea99bd71bbe =====
+tree 2d2be5d7679c9df275e4ec2b0ea08303a90db2ad
+parent 1b2f0dc4163927bc004c81728202af4789a59bbd
+author soctrungkien <soctrungkien@hotmail.com> 1795528768 +0700
+committer soctrungkien <soctrungkien@hotmail.com> 1795528768 +0700
+
+Remove native lib dependency; port liquid tab bar, brand override and package/signature spoof from smali
+
+===== bafe49ac178de3e56c99c6be11c70397ab6d5c92 =====
+tree 2f6a9f4e2542f9bb616da90ca7aa2254e84c4ca4
+parent c887a7aa7a0ef42860f2a3d5a056eea99bd71bbe
+author soctrungkien <soctrungkien@hotmail.com> 1795529270 +0700
+committer soctrungkien <soctrungkien@hotmail.com> 1795529270 +0700
+
+Add diff feature toggles to the fork settings menu
+
+===== aac490026af6aa2bfbae00e133128fd20e9bac78 =====
+tree 38617bc0e171905ea7c49f3edbcd123143475b7d
+parent bafe49ac178de3e56c99c6be11c70397ab6d5c92
+author soctrungkien <soctrungkien@hotmail.com> 1795529337 +0700
+committer soctrungkien <soctrungkien@hotmail.com> 1795529337 +0700
+
+Drop legacy author brand from quote detection and brand override
+
