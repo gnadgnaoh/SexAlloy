@@ -1,0 +1,43 @@
+Markers of the download code inside the fork's published nightly APK
+==================================================================
+Release page : https://github.com/soctrungkien/ZaloXposed/releases/tag/nightly
+Asset        : https://github.com/soctrungkien/ZaloXposed/releases/download/nightly/ZaloXposed-app-release.apk
+Asset date   : 2026-11-24T14:10:33Z (as listed by GitHub)
+Downloaded   : 2026-11-25
+APK size     : 5751284 bytes
+APK SHA-256  : b2eee1e70100ea6a95eabc0ec717baa9aa569032be96ace44fe94252a702b31c
+classes.dex  : 1074748 bytes, SHA-256 26adfb53f7411223c2712a3ac6068f68009f586c97c85c88c7388885dd4c1579
+Built from   : git revision aac490026af6aa2bfbae00e133128fd20e9bac78 (META-INF/version-control-info.textproto)
+               = soctrungkien/ZaloXposed main, commit aac4900
+
+1. Classes of the ported download code (class names are not obfuscated)
+------------------------------------------------------------------
+  Lio/github/electroheavenvn/zaloxposed/hooks/functional/DownloadMediaHook;
+  Lio/github/electroheavenvn/zaloxposed/utilities/FeedMedia;
+  Lio/github/electroheavenvn/zaloxposed/utilities/MediaSaver;
+  Lio/github/electroheavenvn/zaloxposed/utilities/ZaloModel;
+
+2. String constants in classes.dex
+------------------------------------------------------------------
+  PRESENT  ZaloXposed-Download
+  ABSENT   NexAlloy-ZL-DL
+  PRESENT  Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36
+  PRESENT  com.zing.zalo.zmedia.zjxl.ZJXLDecoder
+  PRESENT  dataStoryViewFull
+  PRESENT  ic_bottom_sheet_story_download
+  PRESENT  feed_
+  PRESENT  zalo_story_
+
+3. Menu-ID integer literals in the bytecode (androguard 4.1.4, AnalyzeDex)
+------------------------------------------------------------------
+  Lio/github/electroheavenvn/zaloxposed/hooks/functional/DownloadMediaHook; addFeedItem [36702]
+  Lio/github/electroheavenvn/zaloxposed/hooks/functional/DownloadMediaHook; lambda$hookStoryMenu$4 [36701]
+  20056 / 20057: not found by this scan. In the source, `git grep -E '2005[67]' aac4900 -- app/` also finds nothing
+  (renumbered to 36701 / 36702 in commit bc4e4ae, dated 2026-11-24)
+
+4. How to reproduce
+------------------------------------------------------------------
+  sha256sum ZaloXposed-app-release.apk
+  unzip -o ZaloXposed-app-release.apk classes.dex META-INF/version-control-info.textproto
+  cat META-INF/version-control-info.textproto
+  strings -n 5 classes.dex | grep -E 'DownloadMediaHook|FeedMedia|ZaloModel|MediaSaver|ZaloXposed-Download|AppleWebKit|ZJXLDecoder|dataStoryViewFull|zalo_story_'
